@@ -13,18 +13,18 @@ lockexe.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 
 -- Scripts:
 
-local function KMRKGZB_fake_script() -- lockexe.LocalScript 
+local function GQMW_fake_script() -- lockexe.LocalScript 
 	local script = Instance.new('LocalScript', lockexe)
 
 	local Players = game:GetService("Players")
-	local RunService = game:GetService("RunService")
 	local Player = Players.LocalPlayer
+	local RunService = game:GetService("RunService")
 	local Mouse = Player:GetMouse()
 	
-	local lockKey = nil
-	local targetPartName = nil
-	local target = nil
-	local highlight = nil
+	local lockKey
+	local targetPartName
+	local target
+	local highlight
 	
 	-- Sounds
 	local keySound = Instance.new("Sound")
@@ -37,67 +37,7 @@ local function KMRKGZB_fake_script() -- lockexe.LocalScript
 	lockSound.Volume = 0.1
 	lockSound.Parent = Player:WaitForChild("PlayerGui")
 	
-	-- Notifications
-	local function notify(title, text)
-		pcall(function()
-			game.StarterGui:SetCore("SendNotification", {
-				Title = title;
-				Text = text;
-				Duration = 5
-			})
-		end)
-	end
-	
-	-- Step 1: Choose Lock Key (double press)
-	notify("Lock System", "Press your desired key twice to confirm")
-	local keyChosen = false
-	local firstPressKey = nil
-	local confirmPressed = false
-	
-	Mouse.KeyDown:Connect(function(key)
-		if not keyChosen then
-			if not firstPressKey then
-				firstPressKey = key
-				notify("Lock System", "Press "..key.." again to confirm")
-			elseif key == firstPressKey then
-				confirmPressed = true
-				lockKey = key
-				keyChosen = true
-				keySound:Play()
-				notify("Lock System", "Lock Key set: "..lockKey.." Starting in 1 second")
-			else
-				firstPressKey = key
-				notify("Lock System", "Press "..key.." again to confirm")
-			end
-		end
-	end)
-	
-	-- Wait 1 second before starting
-	local startTime = tick()
-	RunService.RenderStepped:Connect(function()
-		if keyChosen and confirmPressed and tick() - startTime >= 1 then
-			confirmPressed = false
-			notify("Lock System", "Choose target part: H for Head, T for Torso")
-		end
-	end)
-	
-	-- Step 2: Choose Head or Torso
-	local partChosen = false
-	Mouse.KeyDown:Connect(function(key)
-		if keyChosen and not partChosen and not confirmPressed then
-			if key:lower() == "h" then
-				targetPartName = "Head"
-				partChosen = true
-				notify("Lock System", "Target part set to Head")
-			elseif key:lower() == "t" then
-				targetPartName = "Torso"
-				partChosen = true
-				notify("Lock System", "Target part set to Torso")
-			end
-		end
-	end)
-	
-	-- Rainbow outline highlight
+	-- Rainbow colors
 	local rainbowColors = {
 		Color3.fromRGB(255,0,0), Color3.fromRGB(255,127,0),
 		Color3.fromRGB(255,255,0), Color3.fromRGB(0,255,0),
@@ -107,14 +47,34 @@ local function KMRKGZB_fake_script() -- lockexe.LocalScript
 	local colorIndex = 1
 	local colorStep = 0
 	
+	-- Notification helper
+	local function notify(title, text, icon)
+		pcall(function()
+			game.StarterGui:SetCore("SendNotification", {
+				Title = title,
+				Text = text,
+				Duration = 5,
+				Icon = icon or ""
+			})
+		end)
+	end
+	
+	-- Highlight functions
 	local function startHighlight(char)
 		if highlight then highlight:Destroy() end
 		highlight = Instance.new("Highlight")
 		highlight.Adornee = char
-		highlight.FillTransparency = 1 -- no fill
+		highlight.FillTransparency = 1
 		highlight.OutlineTransparency = 0
 		highlight.OutlineColor = rainbowColors[1]
 		highlight.Parent = char
+	end
+	
+	local function removeHighlight()
+		if highlight then
+			highlight:Destroy()
+			highlight = nil
+		end
 	end
 	
 	local function updateRainbow()
@@ -131,60 +91,117 @@ local function KMRKGZB_fake_script() -- lockexe.LocalScript
 		end
 	end
 	
-	-- R6/R15 torso getter
+	-- Get torso/head for R6/R15
 	local function getTorso(char)
-		if char:FindFirstChild("UpperTorso") then
-			return char.UpperTorso
-		elseif char:FindFirstChild("Torso") then
-			return char.Torso
-		end
-		return nil
+		return char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso")
 	end
 	
-	-- Step 3: Lock onto player (single press)
+	-- Lock key setup
+	local keyChosen, firstPressKey, partChosen = false, nil, false
+	
+	-- Main key handler
 	Mouse.KeyDown:Connect(function(key)
-		if key == lockKey and partChosen and not confirmPressed then
-			local closestDistance = math.huge
-			target = nil
+		-- Choose lock key
+		if not keyChosen then
+			if not firstPressKey then
+				firstPressKey = key
+				notify("Lock System", "Press "..key.." again to confirm")
+			elseif key == firstPressKey then
+				keyChosen = true
+				lockKey = key
+				keySound:Play()
+				notify("Lock System", "Lock Key confirmed! Loaded...")
+				notify("Lock System", "Press H for Head or T for Torso")
+			else
+				firstPressKey = key
+				notify("Lock System", "Press "..key.." again to confirm")
+			end
+			return
+		end
 	
-			for _, plr in pairs(Players:GetPlayers()) do
-				if plr ~= Player and plr.Character then
-					local part
-					if targetPartName == "Head" then
-						part = plr.Character:FindFirstChild("Head")
-					else
-						part = getTorso(plr.Character)
-					end
+		-- Choose head or torso
+		if keyChosen and not partChosen then
+			if key:lower() == "h" then
+				targetPartName = "Head"
+				partChosen = true
+				notify("Lock System", "Target part set to Head")
+			elseif key:lower() == "t" then
+				targetPartName = "Torso"
+				partChosen = true
+				notify("Target part set to Torso")
+			end
+			return
+		end
 	
-					if part then
-						local distance = (part.Position - Player.Character.HumanoidRootPart.Position).Magnitude
-						if distance < closestDistance then
-							closestDistance = distance
-							target = plr
+		-- Toggle lock/unlock
+		if keyChosen and partChosen and key == lockKey then
+			if target then
+				notify("Lock System", "Unlocked from "..target.Name)
+				removeHighlight()
+				target = nil
+			else
+				-- Lock to closest player
+				local closestDist = math.huge
+				local newTarget
+				for _, plr in pairs(Players:GetPlayers()) do
+					if plr ~= Player and plr.Character then
+						local part = targetPartName == "Head" and plr.Character:FindFirstChild("Head") or getTorso(plr.Character)
+						if part then
+							local dist = (part.Position - Player.Character.HumanoidRootPart.Position).Magnitude
+							if dist < closestDist then
+								closestDist = dist
+								newTarget = plr
+							end
 						end
 					end
 				end
-			end
 	
-			if target then
-				notify("Lock System", "Target Set: "..target.Name)
-				lockSound:Play()
-				startHighlight(target.Character)
+				if newTarget then
+					target = newTarget
+					startHighlight(target.Character)
+					lockSound:Play()
+	
+					-- Get profile picture
+					local thumbType = Enum.ThumbnailType.HeadShot
+					local thumbSize = Enum.ThumbnailSize.Size100x100
+					local thumbUrl, isReady = Players:GetUserThumbnailAsync(target.UserId, thumbType, thumbSize)
+	
+					-- Calculate time played in hours
+					local timePlayed = math.floor(target.AccountAge / 24) -- approximate as days/24 hours
+	
+					-- Send notification
+					notify(
+						"Target: "..target.Name,
+						"DisplayName: "..target.DisplayName.." | Time Played: "..timePlayed.." hrs",
+						thumbUrl
+					)
+				end
 			end
 		end
 	end)
 	
-	-- Camera/mouse follow
+	-- Camera follow + rainbow
 	RunService.RenderStepped:Connect(function()
 		updateRainbow()
 		if target and target.Character and target.Character:FindFirstChild(targetPartName) then
 			local part = target.Character:FindFirstChild(targetPartName)
 			if part then
-				local cam = workspace.CurrentCamera
-				cam.CFrame = CFrame.new(cam.CFrame.Position, part.Position)
+				workspace.CurrentCamera.CFrame = CFrame.new(workspace.CurrentCamera.CFrame.Position, part.Position)
 			end
 		end
 	end)
 	
+	-- Reset command
+	Player.Chatted:Connect(function(msg)
+		if msg:lower() == "/e reset" or msg:lower() == "/reset" then
+			removeHighlight()
+			target = nil
+			keyChosen, firstPressKey, partChosen = false, nil, false
+			lockKey = nil
+			targetPartName = nil
+			notify("Lock System", "System reset. Press a key twice to set new lock key.")
+		end
+	end)
+	
 end
-coroutine.wrap(KMRKGZB_fake_script)()
+coroutine.wrap(GQMW_fake_script)()
