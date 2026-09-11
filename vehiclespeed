@@ -1,0 +1,584 @@
+-- =============================================
+-- UNIVERSAL VEHICLE SYSTEM — THEMES RESTORED + INFINITE YIELD BUTTON
+-- ✅ All themes back | Infinite Yield = Button | Perfect jump heights | All sections working
+-- =============================================
+
+local Players=game:GetService("Players")
+local RunService=game:GetService("RunService")
+local UserInputService=game:GetService("UserInputService")
+local HttpService=game:GetService("HttpService")
+local TweenService=game:GetService("TweenService")
+local TeleportService=game:GetService("TeleportService")
+local CoreGui=game:GetService("CoreGui")
+local Workspace=game:GetService("Workspace")
+local StarterGui=game:GetService("StarterGui")
+local LocalPlayer=Players.LocalPlayer
+
+local flightEnabled=false local aiEnabled=false local aiTargetPlayer=nil local aiTargetEnabled=false
+local TargetTracer=nil local zeroGravity=false local masslessMode=false local freezeVelocity=false
+local freezeCFrame=false local freezeAngle=false local followCamera=false local antiFlip=false
+local acroSpeed=1.8 local camMode="Default"
+local savedMassless={} local frozenCFrame=nil local DEFAULT_GRAVITY=196.2
+local suspensionStrength=1 local autoWeightShift=false local autoStabilize=false
+local overlapParams=OverlapParams.new() overlapParams.FilterType=Enum.RaycastFilterType.Exclude
+local rayParams=RaycastParams.new() rayParams.FilterType=Enum.RaycastFilterType.Exclude
+
+local CONFIG_FILE="UniversalVehicleConfig.json"
+local Config={ThemeName="Red Dark",ToggleKeyCode="RightShift"}
+
+local function LoadConfig()
+    if typeof(isfile)=="function" and isfile(CONFIG_FILE) then
+        local ok,data=pcall(readfile,CONFIG_FILE)
+        if ok and data and #data>0 then
+            local ok2,decoded=pcall(function()return HttpService:JSONDecode(data)end)
+            if ok2 and typeof(decoded)=="table" then
+                for k,v in pairs(decoded)do Config[k]=v end
+            end
+        end
+    end
+end
+local function SaveConfig()
+    if typeof(writefile)=="function"then
+        local ok,data=pcall(function()return HttpService:JSONEncode(Config)end)
+        if ok then pcall(writefile,CONFIG_FILE,data)end
+    end
+end
+LoadConfig()
+
+pcall(function()if CoreGui:FindFirstChild("UVS_Intro")then CoreGui.UVS_Intro:Destroy()end end)
+local introGui=Instance.new("ScreenGui") introGui.Name="UVS_Intro" introGui.ResetOnSpawn=false
+introGui.IgnoreGuiInset=true introGui.ZIndexBehavior=Enum.ZIndexBehavior.Global introGui.Parent=CoreGui
+local backdrop=Instance.new("Frame") backdrop.Size=UDim2.fromScale(1,1) backdrop.BackgroundColor3=Color3.fromRGB(5,2,0) backdrop.Parent=introGui
+local glow=Instance.new("Frame") glow.Size=UDim2.fromOffset(280,80) glow.Position=UDim2.fromScale(.5,.4) glow.AnchorPoint=Vector2.new(.5,.5)
+glow.BackgroundColor3=Color3.fromRGB(255,60,0) glow.BackgroundTransparency=.92 glow.Parent=backdrop Instance.new("UICorner",glow).CornerRadius=UDim.new(1,0)
+local glow2=Instance.new("Frame") glow2.Size=UDim2.fromOffset(320,90) glow2.Position=UDim2.fromScale(.5,.4) glow2.AnchorPoint=Vector2.new(.5,.5)
+glow2.BackgroundColor3=Color3.fromRGB(255,160,0) glow2.BackgroundTransparency=.95 glow2.Parent=backdrop Instance.new("UICorner",glow2).CornerRadius=UDim.new(0,14)
+local main=Instance.new("Frame") main.Size=UDim2.fromOffset(340,110) main.Position=UDim2.fromScale(.5,.4) main.AnchorPoint=Vector2.new(.5,.5)
+main.BackgroundColor3=Color3.fromRGB(18,10,5) main.BackgroundTransparency=.1 main.Parent=backdrop Instance.new("UICorner",main).CornerRadius=UDim.new(0,14)
+local stroke=Instance.new("UIStroke",main) stroke.Color=Color3.fromRGB(255,90,0) stroke.Thickness=2 stroke.Transparency=.2
+local title=Instance.new("TextLabel",main) title.Size=UDim2.new(1,-20,0,50) title.Position=UDim2.fromOffset(10,10) title.BackgroundTransparency=1
+title.Font=Enum.Font.GothamBlack title.Text="INVALIDX" title.TextColor3=Color3.fromRGB(255,80,0) title.TextSize=42 title.TextTransparency=1
+local subtitle=Instance.new("TextLabel",main) subtitle.Size=UDim2.new(1,-20,0,25) subtitle.Position=UDim2.fromOffset(10,60) subtitle.BackgroundTransparency=1
+subtitle.Font=Enum.Font.GothamMedium subtitle.TextColor3=Color3.fromRGB(255,110,0) subtitle.Text="UNIVERSAL VEHICLE SYSTEM" subtitle.TextSize=14 subtitle.TextTransparency=1
+local status=Instance.new("TextLabel",main) status.Size=UDim2.new(1,-20,0,20) status.Position=UDim2.fromOffset(10,85) status.BackgroundTransparency=1
+status.Font=Enum.Font.Gotham status.TextColor3=Color3.fromRGB(160,140,120) status.TextSize=10 status.TextTransparency=1
+local progressBack=Instance.new("Frame",main) progressBack.Size=UDim2.new(1,-20,0,3) progressBack.Position=UDim2.new(0,10,1,-12)
+progressBack.BackgroundColor3=Color3.fromRGB(50,30,15) Instance.new("UICorner",progressBack).CornerRadius=UDim.new(1,0)
+local progress=Instance.new("Frame",progressBack) progress.Size=UDim2.new(0,0,1,0) progress.BackgroundColor3=Color3.fromRGB(255,110,0)
+Instance.new("UICorner",progress).CornerRadius=UDim.new(1,0)
+
+local function IntroTween(obj,info,props)local t=TweenService:Create(obj,info,props)t:Play()return t end
+title.TextTransparency=1 subtitle.TextTransparency=1 status.TextTransparency=1 progress.Size=UDim2.new(0,0,1,0)
+glow.BackgroundTransparency=1 glow2.BackgroundTransparency=1 backdrop.BackgroundTransparency=1
+task.wait(.15)
+IntroTween(glow2,TweenInfo.new(.6,Enum.EasingStyle.Quad),{BackgroundTransparency=.93,Size=UDim2.fromOffset(360,100)})
+IntroTween(glow,TweenInfo.new(.7,Enum.EasingStyle.Quad),{BackgroundTransparency=.91,Size=UDim2.fromOffset(320,90)})
+task.wait(.2)
+IntroTween(title,TweenInfo.new(.6,Enum.EasingStyle.Back),{TextTransparency=0})
+task.wait(.15)
+IntroTween(subtitle,TweenInfo.new(.5),{TextTransparency=0})
+IntroTween(status,TweenInfo.new(.5),{TextTransparency=0})
+local messages={"Loading vehicle systems...","Calibrating physics...","Loading acrobatics...","Loading camera modes...","Finalizing..."}
+for i,msg in ipairs(messages)do status.Text=msg IntroTween(progress,TweenInfo.new(.3),{Size=UDim2.new(i/#messages,0,1,0)}) task.wait(.22) end
+task.wait(.3)
+IntroTween(title,TweenInfo.new(.4),{TextTransparency=1})
+IntroTween(subtitle,TweenInfo.new(.4),{TextTransparency=1})
+IntroTween(status,TweenInfo.new(.4),{TextTransparency=1})
+IntroTween(progress,TweenInfo.new(.4),{BackgroundTransparency=1})
+IntroTween(glow,TweenInfo.new(.5),{BackgroundTransparency=1,Size=UDim2.fromOffset(400,120)})
+IntroTween(glow2,TweenInfo.new(.5),{BackgroundTransparency=1,Size=UDim2.fromOffset(440,130)})
+IntroTween(backdrop,TweenInfo.new(.6),{BackgroundTransparency=1})
+task.wait(.55) pcall(function()introGui:Destroy()end)
+
+local VenyxLibrary=loadstring(game:HttpGet("https://raw.githubusercontent.com/Documantation12/Universal-Vehicle-Script/main/Library.lua"))()
+local Venyx=VenyxLibrary.new("Universal Vehicle Script",5013109572)
+
+-- =============================================
+-- ✅ ALL THEMES FULLY RESTORED
+-- =============================================
+local Themes={
+    ["Red Dark"]={Background=Color3.fromRGB(20,18,24),Glow=Color3.fromRGB(255,60,0),Accent=Color3.fromRGB(50,20,10),LightContrast=Color3.fromRGB(80,35,20),DarkContrast=Color3.fromRGB(12,8,6),TextColor=Color3.fromRGB(255,255,255)},
+    ["Fire Orange"]={Background=Color3.fromRGB(22,14,8),Glow=Color3.fromRGB(255,110,30),Accent=Color3.fromRGB(60,25,10),LightContrast=Color3.fromRGB(100,45,15),DarkContrast=Color3.fromRGB(12,6,3),TextColor=Color3.fromRGB(255,245,235)},
+    ["Neon Blue"]={Background=Color3.fromRGB(10,15,28),Glow=Color3.fromRGB(0,180,255),Accent=Color3.fromRGB(10,40,70),LightContrast=Color3.fromRGB(20,80,120),DarkContrast=Color3.fromRGB(5,10,20),TextColor=Color3.fromRGB(230,240,255)},
+    ["Emerald Green"]={Background=Color3.fromRGB(10,22,15),Glow=Color3.fromRGB(0,220,90),Accent=Color3.fromRGB(10,60,30),LightContrast=Color3.fromRGB(20,100,50),DarkContrast=Color3.fromRGB(5,15,8),TextColor=Color3.fromRGB(220,255,230)},
+    ["Royal Purple"]={Background=Color3.fromRGB(18,10,28),Glow=Color3.fromRGB(160,60,255),Accent=Color3.fromRGB(40,15,70),LightContrast=Color3.fromRGB(80,30,120),DarkContrast=Color3.fromRGB(10,5,20),TextColor=Color3.fromRGB(240,230,255)},
+    ["Pure White"]={Background=Color3.fromRGB(240,240,245),Glow=Color3.fromRGB(80,80,100),Accent=Color3.fromRGB(200,200,210),LightContrast=Color3.fromRGB(220,220,230),DarkContrast=Color3.fromRGB(180,180,190),TextColor=Color3.fromRGB(30,30,40)},
+    ["Midnight Black"]={Background=Color3.fromRGB(5,5,8),Glow=Color3.fromRGB(100,100,140),Accent=Color3.fromRGB(15,15,25),LightContrast=Color3.fromRGB(30,30,45),DarkContrast=Color3.fromRGB(2,2,4),TextColor=Color3.fromRGB(200,200,220)},
+}
+local function ApplyTheme(name)local t=Themes[name]if not t then return end for k,v in pairs(t)do pcall(function()Venyx:setTheme(k,v)end)end end
+ApplyTheme(Config.ThemeName)
+
+local function GetHumanoid()return LocalPlayer.Character and LocalPlayer.Character:FindFirstChildWhichIsA("Humanoid")end
+local function GetVehicleFromDescendant(desc)
+    if not desc then return nil end
+    return desc:FindFirstAncestor(LocalPlayer.Name.."'s Car")
+        or (desc:FindFirstAncestor("Body")and desc:FindFirstAncestor("Body").Parent or nil)
+        or (desc:FindFirstAncestor("Misc")and desc:FindFirstAncestor("Misc").Parent or nil)
+        or desc:FindFirstAncestorWhichIsA("Model")
+end
+local function GetSeatAndVehicle()
+    local hum=GetHumanoid()
+    if not hum or not hum.SeatPart or not hum.SeatPart:IsA("VehicleSeat")then return nil,nil end
+    local seat=hum.SeatPart
+    local veh=GetVehicleFromDescendant(seat)
+    if not veh then return nil,nil end
+    if not veh.PrimaryPart then
+        local prim=seat.Parent==veh and seat or veh:FindFirstChildWhichIsA("BasePart",true)
+        if prim then veh.PrimaryPart=prim end
+    end
+    return veh.PrimaryPart and seat,veh
+end
+local function CreateTracer()
+    if TargetTracer then pcall(function()TargetTracer:Destroy()end)end
+    local line=Instance.new("Part") line.Name="TargetTracer" line.Anchored=true line.CanCollide=false
+    line.CastShadow=false line.Transparency=.35 line.BrickColor=BrickColor.new("Bright red")
+    line.Material=Enum.Material.Neon line.Size=Vector3.new(.3,.3,0) line.Parent=Workspace
+    TargetTracer=line
+end
+local function UpdateTracer(from,to)
+    if not TargetTracer then CreateTracer()end
+    if not TargetTracer then return end
+    local dist=(from-to).Magnitude
+    TargetTracer.Size=Vector3.new(.3,.3,dist)
+    TargetTracer.CFrame=CFrame.new(from,to)*CFrame.new(0,0,-dist/2)
+end
+local function ClearTracer()if TargetTracer then pcall(function()TargetTracer:Destroy()end)end TargetTracer=nil end
+
+-- =============================================
+-- ✅ PUSH FUNCTION
+-- =============================================
+local function PushVehicleUp(pushForce,forwardBoost,rotX,rotY,rotZ)
+    local _,veh=GetSeatAndVehicle()
+    if not veh or not veh.PrimaryPart then return end
+    local prim=veh.PrimaryPart
+    local fwd=Vector3.new(prim.CFrame.LookVector.X,0,prim.CFrame.LookVector.Z).Unit
+    if fwd.Magnitude<.01 then fwd=Vector3.new(0,0,1) end
+    prim.AssemblyLinearVelocity += Vector3.new(0, pushForce, 0) + fwd * (forwardBoost or 0)
+    if rotX or rotY or rotZ then
+        prim.AssemblyAngularVelocity += Vector3.new(rotX or 0, rotY or 0, rotZ or 0)
+    end
+end
+
+-- =============================================
+-- ✅ ZERO GRAVITY — FULL FIX
+-- =============================================
+local function SetZeroGravityState(state)
+    zeroGravity=state
+    Workspace.Gravity=state and 0 or DEFAULT_GRAVITY
+    local _,veh=GetSeatAndVehicle()
+    if veh then
+        for _,d in ipairs(veh:GetDescendants())do
+            if d:IsA("BasePart")then
+                d.GravityScale=state and 0 or 1
+            end
+        end
+    end
+end
+
+local function EnforceRules()if flightEnabled then if freezeVelocity then freezeVelocity=false end if freezeCFrame then freezeCFrame=false end end end
+
+local vehiclePage=Venyx:addPage("Vehicle",8356815386)
+local usageSection=vehiclePage:addSection("Usage") local velocityEnabled=true
+usageSection:addToggle("Keybinds Active",true,function(v)velocityEnabled=v end)
+
+local flightSection=vehiclePage:addSection("Flight") local flightSpeed,flightVertical,flightSmooth=1,.6,10
+local savedAutoRotate,flightWasActive=true,false
+flightSection:addToggle("Enabled",false,function(v)
+    flightEnabled=v local hum=GetHumanoid()
+    if hum then if v then savedAutoRotate=hum.AutoRotate hum.AutoRotate=false else hum.AutoRotate=savedAutoRotate end end
+    EnforceRules()
+end)
+flightSection:addSlider("Speed",100,10,3500,function(v)flightSpeed=v/100 end)
+flightSection:addSlider("Vertical Speed",60,10,200,function(v)flightVertical=v/100 end)
+flightSection:addSlider("Turn Smoothness",100,10,200,function(v)flightSmooth=v/10 end)
+
+local function AlignPlayerToVehicle(veh)
+    local char=LocalPlayer.Character local hum=GetHumanoid()
+    local root=char and char:FindFirstChild("HumanoidRootPart") local prim=veh and veh.PrimaryPart
+    if not root or not hum or not prim then return end
+    local forward=Vector3.new(prim.CFrame.LookVector.X,0,prim.CFrame.LookVector.Z)
+    if forward.Magnitude<.001 then return end
+    root.CFrame=CFrame.lookAt(root.Position,root.Position+forward.Unit,Vector3.yAxis)
+end
+
+RunService.Stepped:Connect(function(_,dt)
+    local hum=GetHumanoid()
+    if not flightEnabled then if flightWasActive and hum then hum.AutoRotate=savedAutoRotate end flightWasActive=false return end
+    flightWasActive=true
+    if not hum or not hum.SeatPart or not hum.SeatPart:IsA("VehicleSeat")then return end
+    local seat,veh=GetSeatAndVehicle()
+    if not seat or not veh or not veh.PrimaryPart then return end
+    hum.AutoRotate=false
+    local cam=Workspace.CurrentCamera
+    local forward=Vector3.new(cam.CFrame.LookVector.X,0,cam.CFrame.LookVector.Z)
+    local right=Vector3.new(cam.CFrame.RightVector.X,0,cam.CFrame.RightVector.Z)
+    if forward.Magnitude<.001 then forward=Vector3.new(veh.PrimaryPart.CFrame.LookVector.X,0,veh.PrimaryPart.CFrame.LookVector.Z) else forward=forward.Unit end
+    if right.Magnitude>.001 then right=right.Unit end
+    local move=Vector3.zero
+    if UserInputService:IsKeyDown(Enum.KeyCode.W)then move+=forward end
+    if UserInputService:IsKeyDown(Enum.KeyCode.S)then move-=forward end
+    if UserInputService:IsKeyDown(Enum.KeyCode.D)then move+=right end
+    if UserInputService:IsKeyDown(Enum.KeyCode.A)then move-=right end
+    if UserInputService:IsKeyDown(Enum.KeyCode.E)then move+=Vector3.yAxis*flightVertical end
+    if UserInputService:IsKeyDown(Enum.KeyCode.Q)then move-=Vector3.yAxis*flightVertical end
+    local horiz=Vector3.new(move.X,0,move.Z)
+    if horiz.Magnitude>.001 then
+        horiz=horiz.Unit
+        local targetCF=CFrame.lookAt(veh.PrimaryPart.Position,veh.PrimaryPart.Position+horiz,Vector3.yAxis)
+        veh:PivotTo(veh:GetPivot():Lerp(targetCF,math.clamp(dt*flightSmooth,0,1)))
+    end
+    veh.PrimaryPart.AssemblyLinearVelocity=veh.PrimaryPart.AssemblyLinearVelocity:Lerp(move*(flightSpeed*100),math.clamp(dt*12,0,1))
+    veh.PrimaryPart.AssemblyAngularVelocity=Vector3.zero
+    AlignPlayerToVehicle(veh)
+end)
+
+local physicsSection=vehiclePage:addSection("Physics")
+physicsSection:addToggle("Zero Gravity",false,function(v)
+    SetZeroGravityState(v)
+    EnforceRules()
+end)
+
+physicsSection:addToggle("Massless Car",false,function(v)
+    masslessMode=v local _,veh=GetSeatAndVehicle()
+    if veh then
+        for _,d in ipairs(veh:GetDescendants())do
+            if d:IsA("BasePart")then
+                if v then
+                    savedMassless[d]={d.Massless,d.CustomPhysicalProperties}
+                    d.Massless=true
+                    d.CustomPhysicalProperties=PhysicalProperties.new(0, 0.3, 0.5, 2.0, 1.0)
+                else
+                    if savedMassless[d]then
+                        d.Massless=savedMassless[d][1]
+                        d.CustomPhysicalProperties=savedMassless[d][2]
+                    end
+                end
+            end
+        end
+    end
+    EnforceRules()
+end)
+
+physicsSection:addToggle("Freeze Velocity",false,function(v)freezeVelocity=v EnforceRules() end)
+physicsSection:addToggle("Freeze Position",false,function(v)
+    freezeCFrame=v
+    if v then local _,veh=GetSeatAndVehicle()if veh and veh.PrimaryPart then frozenCFrame=veh:GetPivot()end end
+    EnforceRules()
+end)
+physicsSection:addToggle("Freeze Angle",false,function(v)freezeAngle=v end)
+physicsSection:addToggle("Anti-Flip",false,function(v)antiFlip=v end)
+physicsSection:addSlider("Suspension Strength",100,20,200,function(v)suspensionStrength=v/100 end)
+physicsSection:addToggle("Auto Weight Shift",false,function(v)autoWeightShift=v end)
+physicsSection:addToggle("Auto-Stabilize",false,function(v)autoStabilize=v end)
+
+RunService.Heartbeat:Connect(function(dt)
+    EnforceRules() local _,veh=GetSeatAndVehicle()
+    if not veh or not veh.PrimaryPart then return end
+    local prim=veh.PrimaryPart
+    if freezeVelocity then prim.AssemblyLinearVelocity=Vector3.zero end
+    if freezeCFrame and frozenCFrame then veh:PivotTo(frozenCFrame)end
+    if freezeAngle or antiFlip or autoStabilize then
+        local pos=prim.Position
+        local look=Vector3.new(prim.CFrame.LookVector.X,0,prim.CFrame.LookVector.Z)
+        look=look.Magnitude>.001 and look.Unit or Vector3.new(0,0,1)
+        veh:PivotTo(CFrame.lookAt(pos,pos+look,Vector3.yAxis))
+    end
+    if autoWeightShift then
+        local spd=prim.AssemblyLinearVelocity.Magnitude
+        local props=PhysicalProperties.new(math.clamp(1.2-spd/400,.3,1),suspensionStrength,0,3,1)
+        for _,d in ipairs(veh:GetDescendants())do if d:IsA("BasePart")then d.CustomPhysicalProperties=props end end
+    end
+end)
+
+local speedSection=vehiclePage:addSection("Speed & Brakes") local velocityMult,velocityKey=.025,Enum.KeyCode.W
+speedSection:addSlider("Boost Multiplier",25,0,50,function(v)velocityMult=v/1000 end)
+speedSection:addKeybind("Velocity Boost",velocityKey,function()
+    if not velocityEnabled then return end
+    while UserInputService:IsKeyDown(velocityKey)do task.wait()
+        local hum=GetHumanoid()
+        if hum and hum.SeatPart and hum.SeatPart:IsA("VehicleSeat")then
+            hum.SeatPart.AssemblyLinearVelocity*=Vector3.new(1+velocityMult,1,1+velocityMult)
+        end
+        if not velocityEnabled then break end
+    end
+end,function(v)velocityKey=v.KeyCode end)
+local brakeMult=.15
+speedSection:addSlider("Brake Force",brakeMult*1000,0,300,function(v)brakeMult=v/1000 end)
+speedSection:addKeybind("Brake",Enum.KeyCode.S,function()
+    if not velocityEnabled then return end
+    while UserInputService:IsKeyDown(Enum.KeyCode.S)do task.wait()
+        local hum=GetHumanoid()
+        if hum and hum.SeatPart and hum.SeatPart:IsA("VehicleSeat")then
+            hum.SeatPart.AssemblyLinearVelocity*=Vector3.new(1-brakeMult,1,1-brakeMult)
+        end
+    end
+end)
+speedSection:addKeybind("Full Stop",Enum.KeyCode.P,function()
+    local hum=GetHumanoid()
+    if hum and hum.SeatPart and hum.SeatPart:IsA("VehicleSeat")then
+        hum.SeatPart.AssemblyLinearVelocity=Vector3.zero
+        hum.SeatPart.AssemblyAngularVelocity=Vector3.zero
+    end
+end)
+
+-- =============================================
+-- ✅ ACROBATICS — PERFECT HEIGHTS
+-- =============================================
+local acroPage=Venyx:addPage("Acrobatics",8356815386)
+local acroSection=acroPage:addSection("Acrobatics Controls")
+
+acroSection:addButton("Jump",function()
+    PushVehicleUp(70, 0)
+end)
+
+acroSection:addButton("Front Flip",function()
+    PushVehicleUp(65, 0, math.rad(-1440), 0, 0)
+end)
+
+acroSection:addButton("Back Flip",function()
+    PushVehicleUp(65, 0, math.rad(1440), 0, 0)
+end)
+
+acroSection:addButton("Barrel Roll Left",function()
+    PushVehicleUp(55, 0, 0, 0, math.rad(1440))
+end)
+
+acroSection:addButton("Barrel Roll Right",function()
+    PushVehicleUp(55, 0, 0, 0, math.rad(-1440))
+end)
+
+acroSection:addButton("Spin 360 Left",function()
+    PushVehicleUp(50, 0, 0, math.rad(1440), 0)
+end)
+
+acroSection:addButton("Spin 360 Right",function()
+    PushVehicleUp(50, 0, 0, math.rad(-1440), 0)
+end)
+
+acroSection:addButton("Reset Vehicle",function()
+    local _,v=GetSeatAndVehicle()
+    if v and v.PrimaryPart then
+        local p=v.PrimaryPart.Position
+        local fwd=Vector3.new(v.PrimaryPart.CFrame.LookVector.X,0,v.PrimaryPart.CFrame.LookVector.Z).Unit
+        v:PivotTo(CFrame.lookAt(p+Vector3.new(0,2.5,0),p+Vector3.new(0,2.5,0)+fwd,Vector3.yAxis))
+        v.PrimaryPart.AssemblyLinearVelocity=Vector3.zero
+        v.PrimaryPart.AssemblyAngularVelocity=Vector3.zero
+    end
+end)
+
+local camPage=Venyx:addPage("Camera",8356778308) local camSection=camPage:addSection("Camera Modes")
+local camList={"Default","Acrobatics","Chase","Close Follow","Wide View","Top Down","First Person","Cinematic","Drone View","Low Angle","High Angle","Side View Left","Side View Right","Orbit Slow","Orbit Fast","Bumper Cam","Far Chase","Flying Cam","Stunt Cam","Cockpit"}
+camSection:addToggle("Follow Vehicle",false,function(v)followCamera=v end)
+camSection:addDropdown("Camera Mode",camList,function(selected)
+    camMode=selected local cam=Workspace.CurrentCamera cam.CameraType=Enum.CameraType.Custom
+    if selected=="Acrobatics"then cam.FieldOfView=90
+    elseif selected=="Chase"then cam.FieldOfView=72
+    elseif selected=="Close Follow"then cam.FieldOfView=78
+    elseif selected=="Wide View"then cam.FieldOfView=95
+    elseif selected=="Top Down"then cam.FieldOfView=62
+    elseif selected=="First Person"then cam.FieldOfView=70
+    elseif selected=="Cinematic"then cam.FieldOfView=65
+    elseif selected=="Drone View"then cam.FieldOfView=82
+    elseif selected=="Low Angle"then cam.FieldOfView=85
+    elseif selected=="High Angle"then cam.FieldOfView=60
+    elseif selected=="Side View Left"then cam.FieldOfView=75
+    elseif selected=="Side View Right"then cam.FieldOfView=75
+    elseif selected=="Orbit Slow"then cam.FieldOfView=70
+    elseif selected=="Orbit Fast"then cam.FieldOfView=78
+    elseif selected=="Bumper Cam"then cam.FieldOfView=80
+    elseif selected=="Far Chase"then cam.FieldOfView=68
+    elseif selected=="Flying Cam"then cam.FieldOfView=88
+    elseif selected=="Stunt Cam"then cam.FieldOfView=92
+    elseif selected=="Cockpit"then cam.FieldOfView=65
+    else cam.FieldOfView=70 end
+end)
+
+RunService.RenderStepped:Connect(function()
+    if not followCamera then return end
+    local _,veh=GetSeatAndVehicle()
+    if not veh or not veh.PrimaryPart then return end
+    local cam=Workspace.CurrentCamera cam.CameraSubject=veh.PrimaryPart
+    local pos=veh.PrimaryPart.Position
+    local look=Vector3.new(veh.PrimaryPart.CFrame.LookVector.X,0,veh.PrimaryPart.CFrame.LookVector.Z).Unit
+    local right=Vector3.new(veh.PrimaryPart.CFrame.RightVector.X,0,veh.PrimaryPart.CFrame.RightVector.Z).Unit
+    local time=os.clock()
+    if camMode=="Acrobatics"then cam.CoordinateFrame=CFrame.new(pos-look*13+Vector3.new(0,7,0),pos)
+    elseif camMode=="Chase"then cam.CoordinateFrame=CFrame.new(pos-look*17+Vector3.new(0,5,0),pos)
+    elseif camMode=="Close Follow"then cam.CoordinateFrame=CFrame.new(pos-look*7+Vector3.new(0,3.5,0),pos)
+    elseif camMode=="Wide View"then cam.CoordinateFrame=CFrame.new(pos-look*26+Vector3.new(0,11,0),pos)
+    elseif camMode=="Top Down"then cam.CoordinateFrame=CFrame.new(pos+Vector3.new(0,22,0),pos)*CFrame.Angles(math.rad(90),0,0)
+    elseif camMode=="First Person"then cam.CoordinateFrame=CFrame.new(pos+Vector3.new(0,2.6,0),pos+look)
+    elseif camMode=="Cinematic"then cam.CoordinateFrame=CFrame.new(pos-look*15+Vector3.new(0,7.5,0)+right*4.5,pos)
+    elseif camMode=="Drone View"then cam.CoordinateFrame=CFrame.new(pos-look*21+Vector3.new(0,16,0),pos)
+    elseif camMode=="Low Angle"then cam.CoordinateFrame=CFrame.new(pos-look*11+Vector3.new(0,1.5,0),pos)
+    elseif camMode=="High Angle"then cam.CoordinateFrame=CFrame.new(pos-look*14+Vector3.new(0,13,0),pos)
+    elseif camMode=="Side View Left"then cam.CoordinateFrame=CFrame.new(pos-right*16+Vector3.new(0,6,0),pos)
+    elseif camMode=="Side View Right"then cam.CoordinateFrame=CFrame.new(pos+right*16+Vector3.new(0,6,0),pos)
+    elseif camMode=="Orbit Slow"then local o=Vector3.new(math.cos(time*.8)*16,6,math.sin(time*.8)*16) cam.CoordinateFrame=CFrame.new(pos+o,pos)
+    elseif camMode=="Orbit Fast"then local o=Vector3.new(math.cos(time*2.2)*14,5,math.sin(time*2.2)*14) cam.CoordinateFrame=CFrame.new(pos+o,pos)
+    elseif camMode=="Bumper Cam"then cam.CoordinateFrame=CFrame.new(pos+look*2.5+Vector3.new(0,1.2,0),pos+look)
+    elseif camMode=="Far Chase"then cam.CoordinateFrame=CFrame.new(pos-look*28+Vector3.new(0,8,0),pos)
+    elseif camMode=="Flying Cam"then cam.CoordinateFrame=CFrame.new(pos-look*19+Vector3.new(0,14,0)+right*math.sin(time)*6,pos)
+    elseif camMode=="Stunt Cam"then cam.CoordinateFrame=CFrame.new(pos-look*10+Vector3.new(0,8,0),pos)*CFrame.Angles(math.rad(math.sin(time*3)*4),0,0)
+    elseif camMode=="Cockpit"then cam.CoordinateFrame=CFrame.new(pos+look*1.2+Vector3.new(0,2.2,0),pos+look)
+    else cam.CoordinateFrame=CFrame.new(pos-look*11+Vector3.new(0,5,0),pos) end
+end)
+
+local aiPage=Venyx:addPage("AI Driver",8356815386) local aiSection=aiPage:addSection("AI Controls")
+local aiSpeed,aiTurnStr,aiLookAhead,aiSideRange=70,4.5,35,28
+local aiState,aiTurnDir,aiStuckTime,aiLastPos,aiRevTime="FORWARD",1,0,nil,0 local aiSavedRot=true
+aiSection:addToggle("AI Driver Enabled",false,function(v)
+    aiEnabled=v local hum=GetHumanoid()
+    if hum then if v then aiSavedRot=hum.AutoRotate hum.AutoRotate=false else hum.AutoRotate=aiSavedRot end end
+    aiState="FORWARD" aiRevTime=0 aiStuckTime=0 aiLastPos=nil
+    if not v then aiTargetEnabled=false ClearTracer()end
+end)
+aiSection:addSlider("AI Speed",70,20,250,function(v)aiSpeed=v end)
+aiSection:addSlider("Turn Strength",45,10,100,function(v)aiTurnStr=v/10 end)
+aiSection:addSlider("Forward Detection",35,15,120,function(v)aiLookAhead=v end)
+aiSection:addSlider("Side Detection",28,15,100,function(v)aiSideRange=v end)
+
+local targetSection=aiPage:addSection("Follow Target")
+local function GetPlayerList()
+    local list={} for _,p in ipairs(Players:GetPlayers())do if p~=LocalPlayer then table.insert(list,p.Name)end end
+    table.sort(list) if #list==0 then list[1]="No players found"end return list
+end
+local playerList=GetPlayerList()
+targetSection:addDropdown("Select Player",playerList,function(name)
+    if name=="No players found"then aiTargetPlayer=nil aiTargetEnabled=false ClearTracer()return end
+    aiTargetPlayer=Players:FindFirstChild(name)
+end)
+targetSection:addToggle("Follow Selected Player",false,function(v)
+    if v and(not aiEnabled or not aiTargetPlayer)then return false end
+    aiTargetEnabled=v if not v then ClearTracer()end
+end)
+targetSection:addButton("Refresh Player List",function()playerList=GetPlayerList()end)
+targetSection:addButton("Stop Following",function()aiTargetPlayer=nil aiTargetEnabled=false ClearTracer()end)
+Players.PlayerRemoving:Connect(function(p)if aiTargetPlayer==p then aiTargetPlayer=nil aiTargetEnabled=false ClearTracer()end end)
+
+local function IsBlocked(part,veh)
+    if not part or not part:IsA("BasePart")then return false end
+    if veh and part:IsDescendantOf(veh)then return false end
+    if LocalPlayer.Character and part:IsDescendantOf(LocalPlayer.Character)then return false end
+    if aiTargetPlayer and aiTargetPlayer.Character and part:IsDescendantOf(aiTargetPlayer.Character)then return false end
+    return part.CanCollide
+end
+local function CheckBox(veh,offset,size)
+    local pvt=veh:GetPivot()
+    for _,pt in ipairs(Workspace:GetPartBoundsInBox(pvt*CFrame.new(offset),size,overlapParams))do
+        if IsBlocked(pt,veh)then return true end
+    end return false
+end
+local function CheckRay(veh,offset,dir,dist)
+    local pvt=veh:GetPivot()
+    local res=Workspace:Raycast((pvt*CFrame.new(offset)).Position,dir.Unit*dist,rayParams)
+    return res and IsBlocked(res.Instance,veh)
+end
+
+RunService.Heartbeat:Connect(function(dt)
+    local hum=GetHumanoid()
+    if not aiEnabled then if hum then hum.AutoRotate=aiSavedRot end ClearTracer()return end
+    if flightEnabled then ClearTracer()return end
+    if not hum or not hum.SeatPart or not hum.SeatPart:IsA("VehicleSeat")then ClearTracer()return end
+    local seat,veh=GetSeatAndVehicle()
+    if not seat or not veh or not veh.PrimaryPart then ClearTracer()return end
+    hum.AutoRotate=false
+    overlapParams.FilterDescendantsInstances={LocalPlayer.Character,veh}
+    rayParams.FilterDescendantsInstances={LocalPlayer.Character,veh}
+    local pvt=veh:GetPivot() local vehPos=veh.PrimaryPart.Position
+    local _,size=veh:GetBoundingBox()
+    local wd,ln,ht=math.max(size.X,4),math.max(size.Z,6),math.max(size.Y,4)
+    local forward=Vector3.new(pvt.LookVector.X,0,pvt.LookVector.Z).Unit
+    local right=Vector3.new(pvt.RightVector.X,0,pvt.RightVector.Z)
+    right=right.Magnitude>.001 and right.Unit or Vector3.xAxis
+    local spd=veh.PrimaryPart.AssemblyLinearVelocity.Magnitude
+    local lookFwd=math.clamp(aiLookAhead+spd*.25,25,120)
+    local lookSide=math.clamp(aiSideRange+spd*.12,18,90)
+    local goalDir,goalDist=nil,nil
+    if aiTargetEnabled and aiTargetPlayer and aiTargetPlayer.Character then
+        local root=aiTargetPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if root then
+            UpdateTracer(vehPos+Vector3.new(0,2.5,0),root.Position+Vector3.new(0,2.5,0))
+            local diff=root.Position-vehPos
+            goalDist=Vector3.new(diff.X,0,diff.Z).Magnitude
+            if goalDist>3 then goalDir=Vector3.new(diff.X,0,diff.Z).Unit end
+            if goalDist and goalDist<9 then veh.PrimaryPart.AssemblyLinearVelocity*=.55 goalDir=nil end
+        end
+    else ClearTracer()end
+    local blockedFwd=CheckBox(veh,Vector3.new(0,0,-lookFwd*.35),Vector3.new(wd*.9,ht*.85,lookFwd*.55))
+        or CheckRay(veh,Vector3.new(0,ht*.5,-ln*.45),-Vector3.zAxis,lookFwd)
+    local blockedL=CheckBox(veh,Vector3.new(-wd*.8,0,-lookSide*.25),Vector3.new(wd*.85,ht*.85,lookSide*.5))
+        or CheckRay(veh,Vector3.new(-wd*.35,ht*.5,-ln*.35),Vector3.new(-1,0,0),lookSide)
+    local blockedR=CheckBox(veh,Vector3.new(wd*.8,0,-lookSide*.25),Vector3.new(wd*.85,ht*.85,lookSide*.5))
+        or CheckRay(veh,Vector3.new(wd*.35,ht*.5,-ln*.35),Vector3.new(1,0,0),lookSide)
+    if aiLastPos then aiStuckTime=(vehPos-aiLastPos).Magnitude<.08 and spd<7 and(aiStuckTime+dt)or math.max(0,aiStuckTime-dt*2)end
+    aiLastPos=vehPos
+    if aiStuckTime>1.2 and aiState~="REVERSE"then aiState="REVERSE" aiRevTime=0 aiTurnDir=not blockedL and-1 or 1 end
+    if aiState=="FORWARD"and blockedFwd then aiState="AVOID"
+    elseif aiState=="AVOID"and not blockedFwd then aiState="FORWARD"
+    elseif aiState=="AVOID"and blockedL and blockedR then aiState="REVERSE" aiRevTime=0
+    elseif aiState=="REVERSE"then aiRevTime+=dt
+        if aiRevTime>.85 and not blockedL and not blockedR then aiState="AVOID" aiRevTime=0 aiStuckTime=0
+        elseif aiRevTime>3.2 then aiTurnDir=not blockedL and-1 or 1 aiState="RECOVER" aiRevTime=0 end
+    elseif aiState=="RECOVER"and not blockedFwd then aiState="FORWARD" aiStuckTime=0 end
+    local dir=forward local speed=aiSpeed
+    if goalDir and not blockedFwd then dir=goalDir if goalDist and goalDist<50 then speed=aiSpeed*math.clamp(goalDist/50,.35,1) end
+    elseif aiState=="AVOID"then aiTurnDir=not blockedL and-1 or not blockedR and 1 or aiTurnDir dir=(forward+right*aiTurnDir*1.35).Unit speed=aiSpeed*(blockedFwd and .45 or .7)
+    elseif aiState=="REVERSE"then dir=(-forward+right*aiTurnDir*.55).Unit speed=math.min(aiSpeed*.32,50)
+    elseif aiState=="RECOVER"then dir=(forward+right*aiTurnDir*1.8).Unit speed=math.min(aiSpeed*.45,60) end
+    local flat=Vector3.new(dir.X,0,dir.Z).Unit
+    if flat.Magnitude>.001 then veh:PivotTo(pvt:Lerp(CFrame.lookAt(pvt.Position,pvt.Position+flat,Vector3.yAxis),math.clamp(dt*aiTurnStr,0,1)))end
+    local moveDir=Vector3.new(veh.PrimaryPart.CFrame.LookVector.X,0,veh.PrimaryPart.CFrame.LookVector.Z)
+    moveDir=moveDir.Magnitude>.001 and moveDir.Unit or forward
+    if aiState=="REVERSE"and not goalDir then moveDir=-moveDir end
+    local targetVel=moveDir*speed local resp=math.clamp(dt*(6+math.clamp(aiSpeed/100,0,2)),0,1) local curVel=veh.PrimaryPart.AssemblyLinearVelocity
+    veh.PrimaryPart.AssemblyLinearVelocity=Vector3.new(curVel.X+(targetVel.X-curVel.X)*resp,curVel.Y,curVel.Z+(targetVel.Z-curVel.Z)*resp)
+    veh.PrimaryPart.AssemblyAngularVelocity=Vector3.new(0,veh.PrimaryPart.AssemblyAngularVelocity.Y*.2,0)
+end)
+
+local settingsPage=Venyx:addPage("Settings",8356778308)
+local miscSection=settingsPage:addSection("Quick Features")
+
+-- =============================================
+-- ✅ INFINITE YIELD CHANGED FROM TOGGLE → BUTTON
+-- =============================================
+miscSection:addButton("Load Infinite Yield",function()
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source"))()
+end)
+
+miscSection:addButton("Rejoin Server",function()pcall(function()TeleportService:Teleport(game.PlaceId,LocalPlayer)end)end)
+
+local themeSection=settingsPage:addSection("UI Theme") local themeNames={}
+for name in pairs(Themes)do table.insert(themeNames,name)end table.sort(themeNames)
+themeSection:addDropdown("Theme Preset",themeNames,function(selected)Config.ThemeName=selected ApplyTheme(selected) SaveConfig()end)
+themeSection:addButton("Reapply Theme",function()ApplyTheme(Config.ThemeName)end)
+
+local bindSection=settingsPage:addSection("UI Keybind") local defaultKey=Enum.KeyCode.RightShift
+local currentBind=Enum.KeyCode[Config.ToggleKeyCode]or defaultKey
+bindSection:addKeybind("Toggle Menu",currentBind,function()Venyx:toggle()end,function(newBind)if newBind and newBind.KeyCode then Config.ToggleKeyCode=newBind.KeyCode.Name SaveConfig()end end)
+bindSection:addButton("Reset Keybind",function()Config.ToggleKeyCode=defaultKey.Name SaveConfig()end)
+
+local extraSection=settingsPage:addSection("Extras")
+extraSection:addButton("Copy Discord",function()pcall(function()setclipboard("https://discord.gg/AabQVKpWwS")end)end)
+extraSection:addButton("Made by Izaz",function()pcall(function()setclipboard("Universal Vehicle System — Made by Izaz")end)end)
+
+local function GetToggleKey()return Enum.KeyCode[Config.ToggleKeyCode]or defaultKey end
+UserInputService.InputBegan:Connect(function(input,gpe)if not gpe and input.KeyCode==GetToggleKey()then Venyx:toggle()end end)
+
+repeat task.wait() until game:IsLoaded()and game.PlaceId>0
+if game.PlaceId==3351674303 then local page=Venyx:addPage("Wayfort",8357222903) local sec=page:addSection("Dealerships") local list={} pcall(function()for _,d in ipairs(workspace.Game.Dealerships.Dealerships:GetChildren())do table.insert(list,d.Name)end end) if #list>0 then sec:addDropdown("Select Dealership",list,function(name)pcall(function()game.ReplicatedStorage.Remotes.Location:FireServer("Enter",name)end)end) end
+elseif game.PlaceId==891852901 then Venyx:addPage("Greenville",8360925727)
+elseif game.PlaceId==54865335 then Venyx:addPage("Westover",8360954483)
+elseif game.PlaceId==5232896677 then Venyx:addPage("Pacifico",3028235557) end
+
+task.wait(.5) pcall(function()ApplyTheme(Config.ThemeName)end)
+task.wait(1)
+pcall(function()StarterGui:SetCore("SendNotification",{Title="✅ UPDATED",Text="Themes Restored | Infinite Yield = Button!",Duration=5})end)
+print("[UVS] ✅ THEMES RESTORED + INFINITE YIELD = BUTTON")
+print("[UVS] Available Themes: Red Dark, Fire Orange, Neon Blue, Emerald Green, Royal Purple, Pure White, Midnight Black")
+print("[UVS] Jump=70 | Flips=65 | Rolls=55 | Spins=50")
+task.wait(1)
+pcall(function()StarterGui:SetCore("SendNotification",{Title="✅ UPDATED",Text="Themes Restored | Infinite Yield = Button!",Duration=5})end)
+print("[UVS] ✅ THEMES RESTORED + INFINITE YIELD = BUTTON")
+print("[UVS] Available Themes: Red Dark, Fire Orange, Neon Blue, Emerald Green, Royal Purple, Pure White, Midnight Black")
+print("[UVS] Jump=70 | Flips=65 | Rolls=55 | Spins=50")
