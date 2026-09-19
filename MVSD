@@ -6,8 +6,9 @@
        ██║██║╚██╗██║ ╚████╔╝ ██╔══██║██║     ██║██║  ██║ ██╔██╗
        ██║██║ ╚████║  ╚██╔╝  ██║  ██║███████╗██║██████╔╝██╔╝ ██╗
        ╚═╝╚═╝  ╚═══╝   ╚═╝   ╚═╝  ╚═╝╚══════╝╚═╝╚═════╝ ╚═╝  ╚═╝
-            MURDER vs SHERIFF DUELS  •  v4.1  •  InvalidX
-                 Fluent UI  •  Full Working Build
+
+            MURDER vs SHERIFF DUELS  •  v6.0  •  InvalidX
+                Full Release  •  All Executors  •  Mobile
     ═══════════════════════════════════════════════════════════════════════
 --]]
 
@@ -34,20 +35,57 @@ local TweenService       = game:GetService("TweenService")
 local Debris             = game:GetService("Debris")
 local Camera             = Workspace.CurrentCamera
 local Player             = Players.LocalPlayer
-local Mouse              = Player:GetMouse()
+
+local HAS_DRAWING = pcall(function() return Drawing.new end)
+local IS_MOBILE = UserInputService.TouchEnabled and not UserInputService.MouseEnabled
+local TAB_WIDTH = IS_MOBILE and 220 or 180
 
 -- ═══════════════════════════════════════════════════════════════
---  LOAD FLUENT UI
+--  HTTP + FLUENT LOAD
 -- ═══════════════════════════════════════════════════════════════
-local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
-local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/SaveManager.lua"))()
-local InterfaceManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/InterfaceManager.lua"))()
+local function httpGet(url, fallback)
+    local ok, res = pcall(function() return game:HttpGet(url) end)
+    if ok and res and #res > 100 then return res end
+    if fallback then
+        local ok2, res2 = pcall(function() return game:HttpGet(fallback) end)
+        if ok2 and res2 and #res2 > 100 then return res2 end
+    end
+    return nil
+end
+
+local fluentSrc = httpGet(
+    "https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua",
+    "https://raw.githubusercontent.com/dawid-scripts/Fluent/master/src/main.lua"
+)
+if not fluentSrc then
+    warn("[InvalidX] Failed to load Fluent UI.")
+    getgenv().INVALIDX_MVSD_LOADED = nil
+    return
+end
+
+local ok, Fluent = pcall(function() return loadstring(fluentSrc)() end)
+if not ok or not Fluent then
+    warn("[InvalidX] Fluent error: "..tostring(Fluent))
+    getgenv().INVALIDX_MVSD_LOADED = nil
+    return
+end
+
+local SaveManager = nil
+local InterfaceManager = nil
+pcall(function()
+    local s = httpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/SaveManager.lua")
+    if s then SaveManager = loadstring(s)() end
+end)
+pcall(function()
+    local s = httpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/InterfaceManager.lua")
+    if s then InterfaceManager = loadstring(s)() end
+end)
 
 local Window = Fluent:CreateWindow({
     Title = "InvalidX | MVSD",
-    SubTitle = "v4.1  •  Murder vs Sheriff Duels",
-    TabWidth = 160,
-    Size = UDim2.fromOffset(620, 480),
+    SubTitle = "v6.0  •  Full Release",
+    TabWidth = TAB_WIDTH,
+    Size = UDim2.fromOffset(IS_MOBILE and 500 or 640, IS_MOBILE and 400 or 480),
     Acrylic = true,
     Theme = "Darker",
     MinimizeKey = Enum.KeyCode.RightControl,
@@ -64,42 +102,47 @@ local Tabs = {
     Misc     = Window:AddTab({ Title = "Misc",      Icon = "folder" }),
     Settings = Window:AddTab({ Title = "Settings",  Icon = "settings" }),
 }
-local Options = Fluent.Options
+
+local function safeBuild(tabName, fn)
+    local ok, err = pcall(fn)
+    if not ok then
+        warn("[InvalidX] Tab '"..tabName.."' failed: "..tostring(err))
+        pcall(function()
+            Tabs[tabName]:AddParagraph({ Title = "Tab Error", Content = tostring(err) })
+        end)
+    end
+end
 
 -- ═══════════════════════════════════════════════════════════════
---  STATE
+--  STATE + NOTIFICATIONS
 -- ═══════════════════════════════════════════════════════════════
 getgenv().match = false
 local canShoot = true
 local matchEnemies = {}
 local lastFiredTime = 0
 
--- ═══════════════════════════════════════════════════════════════
---  NOTIFY HELPERS
--- ═══════════════════════════════════════════════════════════════
+local function Notify(title, content, dur)
+    pcall(function()
+        Fluent:Notify({ Title = title, Content = content, Duration = dur or 3 })
+    end)
+end
+
 local lastNotify = 0
 local function NotSupportedFeature()
     local now = tick()
     if now - lastNotify >= 5 then
         lastNotify = now
-        Fluent:Notify({
-            Title = "Unsupported Feature",
-            Content = "Your executor doesn't support this. Try Velocity (PC) or Delta (Mobile).",
-            Duration = 4,
-        })
+        Notify("Unsupported Feature", "Try Velocity (PC) or Delta (Mobile).")
     end
 end
 
 local function FeatureActivated(state)
-    Fluent:Notify({
-        Title = state and "Feature Enabled" or "Feature Disabled",
-        Content = state and "Feature toggled on." or "Feature toggled off.",
-        Duration = 2,
-    })
+    Notify(state and "Feature Enabled" or "Feature Disabled",
+           state and "Toggled on." or "Toggled off.", 2)
 end
 
 -- ═══════════════════════════════════════════════════════════════
---  MATCH TRACKING
+--  TRACKERS
 -- ═══════════════════════════════════════════════════════════════
 task.spawn(function()
     while getgenv().INVALIDX_EXEC_TOKEN == EXEC_TOKEN do
@@ -114,22 +157,21 @@ task.spawn(function()
     while getgenv().INVALIDX_EXEC_TOKEN == EXEC_TOKEN do
         task.wait(0.1)
         local currentMatch = Player:GetAttribute("Match")
-        local tempTable = {}
+        local temp = {}
         if currentMatch then
             for _, v in ipairs(Players:GetPlayers()) do
                 if v ~= Player and v:GetAttribute("Match") == currentMatch then
-                    local char = v.Character
-                    if char and char:FindFirstChild("Humanoid") and char.Humanoid.Health > 0 then
-                        table.insert(tempTable, v)
+                    local c = v.Character
+                    if c and c:FindFirstChild("Humanoid") and c.Humanoid.Health > 0 then
+                        table.insert(temp, v)
                     end
                 end
             end
         end
-        matchEnemies = tempTable
+        matchEnemies = temp
     end
 end)
 
--- Gun cooldown tracker
 task.spawn(function()
     local lastGun, conn
     while getgenv().INVALIDX_EXEC_TOKEN == EXEC_TOKEN do
@@ -142,22 +184,21 @@ task.spawn(function()
             if container then
                 for _, tool in ipairs(container:GetChildren()) do
                     if tool:IsA("Tool") and tool:FindFirstChild("Fire") and tool:FindFirstChild("Reload") then
-                        gun = tool
-                        break
+                        gun = tool; break
                     end
                 end
             end
             if gun then break end
         end
         if gun and gun ~= lastGun then
-            if conn then conn:Disconnect() end
+            if conn then pcall(function() conn:Disconnect() end) end
             lastGun = gun
-            local fireSound = gun:FindFirstChild("Fire")
-            if fireSound and fireSound:IsA("Sound") then
-                conn = fireSound.Played:Connect(function() lastFiredTime = tick() end)
+            local s = gun:FindFirstChild("Fire")
+            if s and s:IsA("Sound") then
+                conn = s.Played:Connect(function() lastFiredTime = tick() end)
             end
         elseif not gun then
-            if conn then conn:Disconnect(); conn = nil end
+            if conn then pcall(function() conn:Disconnect() end); conn = nil end
             lastGun = nil
         end
     end
@@ -191,28 +232,28 @@ local function getGunCooldown()
 end
 
 local function equipGun()
-    local character = Player.Character
-    local backpack = Player:FindFirstChildOfClass("Backpack")
-    if not character or not backpack then return false end
-    local humanoid = character:FindFirstChildOfClass("Humanoid")
-    if not humanoid or humanoid.Health <= 0 then return false end
+    local c = Player.Character
+    local bp = Player:FindFirstChildOfClass("Backpack")
+    if not c or not bp then return false end
+    local h = c:FindFirstChildOfClass("Humanoid")
+    if not h or h.Health <= 0 then return false end
     if getgenv().match then
         local gun = getGun()
-        if gun then humanoid:EquipTool(gun) return true end
+        if gun then pcall(function() h:EquipTool(gun) end); return true end
     end
     return false
 end
 
 local function equipKnife()
-    local character = Player.Character
-    local backpack = Player:FindFirstChildOfClass("Backpack")
-    if not character or not backpack then return false end
-    local humanoid = character:FindFirstChildOfClass("Humanoid")
-    if not humanoid or humanoid.Health <= 0 then return false end
+    local c = Player.Character
+    local bp = Player:FindFirstChildOfClass("Backpack")
+    if not c or not bp then return false end
+    local h = c:FindFirstChildOfClass("Humanoid")
+    if not h or h.Health <= 0 then return false end
     if getgenv().match then
-        for _, tool in ipairs(backpack:GetChildren()) do
+        for _, tool in ipairs(bp:GetChildren()) do
             if tool:IsA("Tool") and tool:GetAttribute("EquipAnimation") == "Knife_Equip" then
-                humanoid:EquipTool(tool)
+                pcall(function() h:EquipTool(tool) end)
                 return true
             end
         end
@@ -228,23 +269,22 @@ local function CharacterRayOrigin(char)
 end
 
 local function hasClearLOS(fromPos, toPos, myChar, targetChar)
-    local params = RaycastParams.new()
-    params.FilterDescendantsInstances = { myChar, targetChar }
-    params.FilterType = Enum.RaycastFilterType.Exclude
-    local result = workspace:Raycast(fromPos, (toPos - fromPos), params)
-    if result then
-        if not result.Instance:IsDescendantOf(targetChar) then
-            return false
-        end
-    end
+    if not (fromPos and toPos and myChar and targetChar) then return false end
+    local p = RaycastParams.new()
+    p.FilterDescendantsInstances = { myChar, targetChar }
+    p.FilterType = Enum.RaycastFilterType.Exclude
+    local r = workspace:Raycast(fromPos, (toPos - fromPos), p)
+    if r and not r.Instance:IsDescendantOf(targetChar) then return false end
     return true
 end
 
 local function isValidEnemy(enemy)
-    if not enemy or enemy == Player then return false end
+    if not enemy then return false end
+    if enemy == Player or enemy == Players.LocalPlayer then return false end
     local c = enemy.Character
     if not c or c.Parent ~= Workspace then return false end
-    if enemy.Team and enemy.Team == Player.Team then return false end
+    if c == Player.Character then return false end
+    if enemy.Team and Player.Team and enemy.Team == Player.Team then return false end
     local h = c:FindFirstChild("Humanoid")
     if not h or h.Health <= 0 then return false end
     if Collection:HasTag(c, "Invulnerable") or Collection:HasTag(c, "SpeedTrail") then return false end
@@ -256,39 +296,36 @@ end
 -- ═══════════════════════════════════════════════════════════════
 local BulletRendererColor = Color3.fromRGB(255, 255, 255)
 local function BulletRenderer(origin, targetPos)
-    local function CreatePseudoPart(cf)
-        local p = Instance.new("Part")
-        p.Size = Vector3.new(0.1, 0.1, 0.1)
-        p.Transparency = 1; p.CanCollide = false; p.CanQuery = false; p.CanTouch = false
-        p.Anchored = true; p.CFrame = cf; p.Parent = workspace
-        return p
-    end
-    local startPart = CreatePseudoPart(CFrame.lookAt(origin, targetPos) * CFrame.new(0, 0, -1))
-    local endPart = CreatePseudoPart(CFrame.new(targetPos))
-    local beam = Instance.new("Beam")
-    beam.Texture = ""
-    beam.TextureLength = 1
-    beam.TextureMode = Enum.TextureMode.Stretch
-    beam.TextureSpeed = 0
-    beam.Color = ColorSequence.new(BulletRendererColor)
-    beam.LightEmission = 1
-    beam.LightInfluence = 0
-    beam.Brightness = 5
-    beam.Width0 = 0; beam.Width1 = 0
-    local att0 = Instance.new("Attachment", startPart)
-    local att1 = Instance.new("Attachment", endPart)
-    beam.Attachment0 = att0; beam.Attachment1 = att1
-    beam.Parent = startPart
-    local fi = TweenService:Create(beam, TweenInfo.new(0.05, Enum.EasingStyle.Cubic, Enum.EasingDirection.In), {Width0 = 0.3, Width1 = 0.6})
-    local fo = TweenService:Create(beam, TweenInfo.new(0.1, Enum.EasingStyle.Cubic, Enum.EasingDirection.Out), {Width0 = 0, Width1 = 0})
-    fi:Play()
-    fi.Completed:Connect(function() fo:Play() end)
-    Debris:AddItem(startPart, 0.3)
-    Debris:AddItem(endPart, 0.3)
+    pcall(function()
+        local function pp(cf)
+            local p = Instance.new("Part")
+            p.Size = Vector3.new(0.1,0.1,0.1)
+            p.Transparency = 1; p.CanCollide = false; p.CanQuery = false
+            p.CanTouch = false; p.Anchored = true; p.CFrame = cf
+            p.Parent = workspace
+            return p
+        end
+        local sP = pp(CFrame.lookAt(origin, targetPos) * CFrame.new(0, 0, -1))
+        local eP = pp(CFrame.new(targetPos))
+        local b = Instance.new("Beam")
+        b.Texture = ""; b.TextureLength = 1
+        b.TextureMode = Enum.TextureMode.Stretch; b.TextureSpeed = 0
+        b.Color = ColorSequence.new(BulletRendererColor)
+        b.LightEmission = 1; b.LightInfluence = 0; b.Brightness = 5
+        b.Width0 = 0; b.Width1 = 0
+        local a0 = Instance.new("Attachment", sP)
+        local a1 = Instance.new("Attachment", eP)
+        b.Attachment0 = a0; b.Attachment1 = a1; b.Parent = sP
+        local fi = TweenService:Create(b, TweenInfo.new(0.05, Enum.EasingStyle.Cubic, Enum.EasingDirection.In), {Width0=0.3, Width1=0.6})
+        local fo = TweenService:Create(b, TweenInfo.new(0.1, Enum.EasingStyle.Cubic, Enum.EasingDirection.Out), {Width0=0, Width1=0})
+        fi:Play()
+        fi.Completed:Connect(function() fo:Play() end)
+        Debris:AddItem(sP, 0.3); Debris:AddItem(eP, 0.3)
+    end)
 end
 
 -- ═══════════════════════════════════════════════════════════════
---  SILENT AIM STATE  (declared early so ShootGun can use it)
+--  SILENT AIM STATE
 -- ═══════════════════════════════════════════════════════════════
 getgenv().silent_aim_enabled = false
 getgenv().silent_aim_fov = 200
@@ -302,38 +339,28 @@ local function getSilentAimTarget()
     return getgenv().INVALIDX_SILENT_TARGET
 end
 
--- ═══════════════════════════════════════════════════════════════
---  SHOOT GUN (with silent aim integration)
--- ═══════════════════════════════════════════════════════════════
 local function ShootGun(target)
-    -- If silent aim has a target, prefer it over the passed one
-    local silentTarget = getSilentAimTarget()
-    if silentTarget then
-        target = silentTarget
-    end
+    local silent = getSilentAimTarget()
+    if silent then target = silent end
     if not target then return end
-
+    if target == Player or target == Players.LocalPlayer then return end
     local myChar = Player.Character
     if not myChar then return end
     local origin = CharacterRayOrigin(myChar)
     if not origin then return end
-    local targetChar = target.Character
-    if not targetChar then return end
-
-    -- Silent aim uses preferred target part
+    local tgtChar = target.Character
+    if not tgtChar or tgtChar == myChar then return end
     local hitPart
-    if silentTarget and silentTarget == target then
-        hitPart = targetChar:FindFirstChild(getgenv().silent_aim_target_part)
-            or targetChar:FindFirstChild("Head")
-            or targetChar:FindFirstChild("HumanoidRootPart")
+    if silent and silent == target then
+        hitPart = tgtChar:FindFirstChild(getgenv().silent_aim_target_part)
+            or tgtChar:FindFirstChild("Head")
+            or tgtChar:FindFirstChild("HumanoidRootPart")
     else
-        hitPart = targetChar:FindFirstChild("Head") or targetChar:FindFirstChild("HumanoidRootPart")
+        hitPart = tgtChar:FindFirstChild("Head") or tgtChar:FindFirstChild("HumanoidRootPart")
     end
     if not hitPart then return end
-
     local tool = getGun()
     if not tool then return end
-
     canShoot = false
     local targetPos = hitPart.Position
     local muzzle = tool:FindFirstChild("Muzzle", true)
@@ -342,838 +369,876 @@ local function ShootGun(target)
     pcall(function()
         ReplicatedStorage.Remotes.ShootGun:FireServer(origin, targetPos, hitPart, targetPos)
     end)
-    local sound = tool:FindFirstChild("Fire")
-    if sound and sound:IsA("Sound") then sound:Play() end
+    local s = tool:FindFirstChild("Fire")
+    if s and s:IsA("Sound") then pcall(function() s:Play() end) end
     task.delay(getGunCooldown(), function() canShoot = true end)
 end
 
 -- ═══════════════════════════════════════════════════════════════
---  ─────────────  MAIN TAB  ─────────────
+--  MAIN TAB
 -- ═══════════════════════════════════════════════════════════════
-Tabs.Main:AddSection("Character")
+safeBuild("Main", function()
+    Tabs.Main:AddSection("Character")
 
-local autounanchor = false
-Tabs.Main:AddToggle("AutoUnanchor", {
-    Title = "Auto UnAnchor Character",
-    Description = "Bypass the 5-second pre-match freeze",
-    Default = false,
-}):OnChanged(function(v)
-    autounanchor = v
-    local function monitor(c)
-        local rp = c:WaitForChild("HumanoidRootPart", 5)
-        local hum = c:WaitForChild("Humanoid", 5)
-        if not rp or not hum then return end
-        local conn
-        conn = RunService.Heartbeat:Connect(function()
-            if not c.Parent or hum.Health <= 0 or not autounanchor then
-                conn:Disconnect(); return
-            end
-            if rp.Anchored then rp.Anchored = false end
-        end)
-    end
-    if Player.Character then task.spawn(monitor, Player.Character) end
-    Player.CharacterAdded:Connect(monitor)
-end)
-
-Tabs.Main:AddColorpicker("TracerColor", {
-    Title = "Bullet Tracer Color",
-    Default = BulletRendererColor,
-}):OnChanged(function(col) BulletRendererColor = col end)
-
-Tabs.Main:AddSection("Auto Shoot")
-getgenv().autoshoot_enabled = false
-getgenv().autoshoot_distance = 300   -- separate from throw distance
-getgenv().autoshoot_cooldown = 2
-local autoshootThread
-
-Tabs.Main:AddToggle("AutoShoot", {
-    Title = "Enable Autoshoot",
-    Description = "Automatically shoots the closest visible enemy",
-    Default = false,
-}):OnChanged(function(v)
-    getgenv().autoshoot_enabled = v
-    FeatureActivated(v)
-    if autoshootThread then task.cancel(autoshootThread); autoshootThread = nil end
-    if v then
-        autoshootThread = task.spawn(function()
-            while getgenv().autoshoot_enabled and getgenv().INVALIDX_EXEC_TOKEN == EXEC_TOKEN do
-                local myChar = Player.Character
-                local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
-                local myHum = myChar and myChar:FindFirstChild("Humanoid")
-                if getgenv().match and myRoot and myHum and myHum.Health > 0 then
-                    local best, bestD = nil, getgenv().autoshoot_distance
-                    for _, e in ipairs(matchEnemies) do
-                        local c = e.Character
-                        local hrp = c and c:FindFirstChild("HumanoidRootPart")
-                        local hum = c and c:FindFirstChild("Humanoid")
-                        if e ~= Player and hum and hum.Health > 0 and hrp then
-                            local d = (hrp.Position - myRoot.Position).Magnitude
-                            if d < bestD then
-                                local diffTeam = (not e.Team or e.Team ~= Player.Team)
-                                local inFOV = (Camera.CFrame.LookVector:Dot((hrp.Position - Camera.CFrame.Position).Unit) >= 0.9)
-                                if diffTeam and inFOV then bestD = d; best = e end
-                            end
-                        end
-                    end
-                    if best and canShoot then
-                        local tgtHrp = best.Character and best.Character:FindFirstChild("HumanoidRootPart")
-                        if tgtHrp and hasClearLOS(myRoot.Position, tgtHrp.Position, myChar, best.Character) then
-                            ShootGun(best)
-                        end
-                    end
+    local autounanchor = false
+    Tabs.Main:AddToggle("AutoUnanchor", {
+        Title = "Auto UnAnchor Character",
+        Description = "Bypass the 5-second pre-match freeze",
+        Default = false,
+    }):OnChanged(function(v)
+        autounanchor = v
+        local function monitor(c)
+            local rp = c:WaitForChild("HumanoidRootPart", 5)
+            local hum = c:WaitForChild("Humanoid", 5)
+            if not rp or not hum then return end
+            local conn
+            conn = RunService.Heartbeat:Connect(function()
+                if not c.Parent or hum.Health <= 0 or not autounanchor then
+                    conn:Disconnect(); return
                 end
-                task.wait(0.03)
-            end
-        end)
-    end
-end)
+                if rp.Anchored then rp.Anchored = false end
+            end)
+        end
+        if Player.Character then task.spawn(monitor, Player.Character) end
+        Player.CharacterAdded:Connect(monitor)
+    end)
 
-Tabs.Main:AddSlider("AutoShootDist", {
-    Title = "Autoshoot Max Distance",
-    Min = 0, Max = 1000, Default = 300, Rounding = 0,
-}):OnChanged(function(v) getgenv().autoshoot_distance = v end)
+    Tabs.Main:AddColorpicker("TracerColor", {
+        Title = "Bullet Tracer Color",
+        Default = BulletRendererColor,
+    }):OnChanged(function(col) BulletRendererColor = col end)
 
-Tabs.Main:AddSlider("AutoShootCD", {
-    Title = "Autoshoot Cooldown",
-    Min = 0.5, Max = 10, Default = 2, Rounding = 1,
-}):OnChanged(function(v) getgenv().autoshoot_cooldown = v end)
+    -- AUTO SHOOT
+    Tabs.Main:AddSection("Auto Shoot")
+    getgenv().autoshoot_enabled = false
+    getgenv().autoshoot_distance = 300
+    getgenv().autoshoot_cooldown = 2
+    local thread
 
-Tabs.Main:AddSection("Knife Throw")
-getgenv().auto_throw_enabled = false
-getgenv().throw_distance = 300       -- separate
-getgenv().throw_cooldown = 2
-local autoThrowThread
-local lastThrowTime = 0
-
-local function throwKnife(targetChar)
-    local tool = Player.Character and Player.Character:FindFirstChildOfClass("Tool")
-    if not tool or not tool:FindFirstChild("RightHandle") then return end
-    local tgtHrp = targetChar:FindFirstChild("HumanoidRootPart")
-    if not tgtHrp then return end
-    local origin = CharacterRayOrigin(Player.Character)
-    if not origin then return end
-    local dir = (tgtHrp.Position - origin).Unit
-    ReplicatedStorage.Remotes.ThrowStart:FireServer(origin, dir)
-    local ok, ctrl = pcall(function() return require(ReplicatedStorage.Modules.KnifeProjectileController) end)
-    if ok and ctrl then
-        ctrl({
-            Speed = tool:GetAttribute("ThrowSpeed"),
-            KnifeProjectile = tool.RightHandle:Clone(),
-            Direction = dir,
-            Origin = origin,
-        }, function(r)
-            ReplicatedStorage.Remotes.ThrowHit:FireServer(r and r.Instance, r and r.Position)
-        end)
-    end
-    lastThrowTime = tick()
-end
-
-Tabs.Main:AddToggle("AutoThrow", {
-    Title = "Enable Auto Throw Knife",
-    Description = "Throws knife at enemies in line of sight",
-    Default = false,
-}):OnChanged(function(v)
-    getgenv().auto_throw_enabled = v
-    FeatureActivated(v)
-    if autoThrowThread then task.cancel(autoThrowThread); autoThrowThread = nil end
-    if v then
-        autoThrowThread = task.spawn(function()
-            while getgenv().auto_throw_enabled and getgenv().INVALIDX_EXEC_TOKEN == EXEC_TOKEN do
-                if (tick() - lastThrowTime) >= getgenv().throw_cooldown then
+    Tabs.Main:AddToggle("AutoShoot", {
+        Title = "Enable Autoshoot",
+        Description = "Shoots closest visible enemy during a match",
+        Default = false,
+    }):OnChanged(function(v)
+        getgenv().autoshoot_enabled = v
+        FeatureActivated(v)
+        if thread then task.cancel(thread); thread = nil end
+        if v then
+            thread = task.spawn(function()
+                while getgenv().autoshoot_enabled and getgenv().INVALIDX_EXEC_TOKEN == EXEC_TOKEN do
                     local myChar = Player.Character
                     local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
-                    if myRoot then
-                        local best, bestD = nil, getgenv().throw_distance
-                        for _, p in ipairs(matchEnemies) do
-                            if p ~= Player and p.Character and p.Team ~= Player.Team then
-                                local eh = p.Character:FindFirstChild("HumanoidRootPart")
-                                local eh2 = p.Character:FindFirstChild("Humanoid")
-                                if eh and eh2 and eh2.Health > 0 then
-                                    local d = (eh.Position - myRoot.Position).Magnitude
-                                    local p2 = RaycastParams.new()
-                                    p2.FilterDescendantsInstances = {myChar, p.Character}
-                                    p2.FilterType = Enum.RaycastFilterType.Exclude
-                                    local r = workspace:Raycast(myRoot.Position, eh.Position - myRoot.Position, p2)
-                                    if d < bestD and not r then bestD = d; best = p.Character end
+                    local myHum = myChar and myChar:FindFirstChild("Humanoid")
+                    if getgenv().match and myRoot and myHum and myHum.Health > 0 then
+                        local best, bestD = nil, tonumber(getgenv().autoshoot_distance) or 300
+                        for _, e in ipairs(matchEnemies) do
+                            if isValidEnemy(e) then
+                                local c = e.Character
+                                local hrp = c and c:FindFirstChild("HumanoidRootPart")
+                                local hum = c and c:FindFirstChild("Humanoid")
+                                if hum and hum.Health > 0 and hrp then
+                                    local d = (hrp.Position - myRoot.Position).Magnitude
+                                    if d > 5 and d < bestD then
+                                        local dt = (not e.Team or not Player.Team or e.Team ~= Player.Team)
+                                        local inF = Camera.CFrame.LookVector:Dot((hrp.Position - Camera.CFrame.Position).Unit) >= 0.9
+                                        if dt and inF then bestD = d; best = e end
+                                    end
                                 end
                             end
                         end
-                        if best then throwKnife(best) end
-                    end
-                end
-                task.wait(0.1)
-            end
-        end)
-    end
-end)
-
-Tabs.Main:AddSlider("ThrowDist", { Title = "Max Throw Distance", Min = 0, Max = 1000, Default = 300, Rounding = 0,
-    }):OnChanged(function(v) getgenv().throw_distance = v end)
-Tabs.Main:AddSlider("ThrowCD", { Title = "Throw Cooldown", Min = 0.5, Max = 10, Default = 2, Rounding = 1,
-    }):OnChanged(function(v) getgenv().throw_cooldown = v end)
-
-Tabs.Main:AddSection("Trigger Bot")
-getgenv().triggerbot_enabled = false
-getgenv().triggerbot_firing = false
-getgenv().triggerbot_cooldown = 1
-
-RunService.Heartbeat:Connect(function()
-    if not getgenv().triggerbot_enabled or not getgenv().match then return end
-    if getgenv().triggerbot_firing or not canShoot then return end
-    local c = Player.Character
-    if not c then return end
-    local mp = UserInputService:GetMouseLocation()
-    local ray = Camera:ViewportPointToRay(mp.X, mp.Y)
-    local rp = RaycastParams.new()
-    rp.FilterType = Enum.RaycastFilterType.Exclude
-    rp.FilterDescendantsInstances = {c}
-    rp.IgnoreWater = true
-    local res = Workspace:Raycast(ray.Origin, ray.Direction * 2000, rp)
-    if not res then return end
-    local hitModel = res.Instance:FindFirstAncestorOfClass("Model")
-    if not hitModel then return end
-    local hitPlayer = Players:GetPlayerFromCharacter(hitModel)
-    if not hitPlayer then return end
-    if isValidEnemy(hitPlayer) then
-        getgenv().triggerbot_firing = true
-        local hitPart = hitPlayer.Character:FindFirstChild("LowerTorso")
-            or hitPlayer.Character:FindFirstChild("UpperTorso")
-            or hitPlayer.Character:FindFirstChild("Head")
-        if hitPart then
-            ShootGun(hitPlayer)
-        else
-            getgenv().triggerbot_firing = false
-        end
-        task.delay(getgenv().triggerbot_cooldown, function() getgenv().triggerbot_firing = false end)
-    end
-end)
-
-Tabs.Main:AddToggle("TriggerBot", { Title = "Trigger Bot", Description = "Fires when crosshair is on an enemy", Default = false,
-    }):OnChanged(function(v) getgenv().triggerbot_enabled = v; FeatureActivated(v) end)
-Tabs.Main:AddSlider("TriggerCD", { Title = "Trigger Cooldown", Min = 0, Max = 3, Default = 1, Rounding = 1,
-    }):OnChanged(function(v) getgenv().triggerbot_cooldown = v end)
-
-Tabs.Main:AddSection("Hitbox Expander")
-getgenv().hitbox_expander = false
-getgenv().hitbox_size = 13
-getgenv().hitbox_color = Color3.fromRGB(255, 0, 0)
-
-Tabs.Main:AddToggle("HitboxExp", { Title = "Enable Hitbox Expander", Description = "Enlarges enemy hitboxes in match", Default = false,
-    }):OnChanged(function(v)
-        getgenv().hitbox_expander = v
-        FeatureActivated(v)
-        if not v then
-            for _, p in ipairs(matchEnemies) do
-                if p ~= Player then
-                    local c = p.Character
-                    local hrp = c and c:FindFirstChild("HumanoidRootPart")
-                    if hrp then
-                        hrp.Size = Vector3.new(2,2,1); hrp.CanCollide = false
-                        local hb = hrp:FindFirstChild("hit_box"); if hb then hb:Destroy() end
-                    end
-                end
-            end
-            return
-        end
-        task.spawn(function()
-            while getgenv().hitbox_expander and getgenv().INVALIDX_EXEC_TOKEN == EXEC_TOKEN do
-                task.wait(0.1)
-                for _, p in ipairs(matchEnemies) do
-                    if p ~= Player and p.Character and p.Team ~= Player.Team then
-                        local hrp = p.Character:FindFirstChild("HumanoidRootPart")
-                        if hrp then
-                            hrp.Size = Vector3.new(getgenv().hitbox_size, getgenv().hitbox_size, getgenv().hitbox_size)
-                            hrp.CanCollide = true
-                            local hb = hrp:FindFirstChild("hit_box")
-                            if not hb then
-                                local bh = Instance.new("BoxHandleAdornment")
-                                bh.Name = "hit_box"; bh.Adornee = hrp; bh.AlwaysOnTop = true
-                                bh.ZIndex = 10; bh.Size = hrp.Size
-                                bh.Color3 = getgenv().hitbox_color; bh.Transparency = 0.8
-                                bh.Parent = hrp
-                            else hb.Size = hrp.Size; hb.Color3 = getgenv().hitbox_color end
-                        end
-                    end
-                end
-            end
-        end)
-    end)
-
-Tabs.Main:AddSlider("HitboxSize", { Title = "Hitbox Size", Min = 5, Max = 100, Default = 13, Rounding = 0,
-    }):OnChanged(function(v) getgenv().hitbox_size = v end)
-Tabs.Main:AddColorpicker("HitboxColor", { Title = "Hitbox Color", Default = getgenv().hitbox_color,
-    }):OnChanged(function(c) getgenv().hitbox_color = c end)
-
-Tabs.Main:AddSection("Gun Cooldown")
-getgenv().original_cooldowns = {}
-getgenv().remove_gun_cooldown = false
-Tabs.Main:AddToggle("RemoveGunCD", { Title = "Remove Gun Cooldown", Default = false,
-    }):OnChanged(function(v)
-        getgenv().remove_gun_cooldown = v
-        FeatureActivated(v)
-        if v then
-            getgenv().original_cooldowns = {}
-            task.spawn(function()
-                while getgenv().remove_gun_cooldown and getgenv().INVALIDX_EXEC_TOKEN == EXEC_TOKEN do
-                    task.wait(0.1)
-                    local tools = {}
-                    for _, cont in ipairs({Player:FindFirstChild("Backpack"), Player.Character}) do
-                        if cont then
-                            for _, t in ipairs(cont:GetChildren()) do
-                                if t:IsA("Tool") and t:FindFirstChild("Fire") then table.insert(tools, t) end
+                        if best and canShoot then
+                            local hrp = best.Character and best.Character:FindFirstChild("HumanoidRootPart")
+                            if hrp and hasClearLOS(myRoot.Position, hrp.Position, myChar, best.Character) then
+                                ShootGun(best)
                             end
                         end
                     end
-                    for _, t in ipairs(tools) do
-                        if getgenv().original_cooldowns[t] == nil then
-                            getgenv().original_cooldowns[t] = t:GetAttribute("Cooldown")
+                    task.wait(0.03)
+                end
+            end)
+        end
+    end)
+
+    Tabs.Main:AddSlider("AutoShootDist", { Title = "Autoshoot Max Distance", Min = 0, Max = 1000, Default = 300, Rounding = 0,
+        }):OnChanged(function(v) getgenv().autoshoot_distance = tonumber(v) or 300 end)
+    Tabs.Main:AddSlider("AutoShootCD", { Title = "Autoshoot Cooldown", Min = 0.5, Max = 10, Default = 2, Rounding = 1,
+        }):OnChanged(function(v) getgenv().autoshoot_cooldown = tonumber(v) or 2 end)
+
+    -- KNIFE THROW
+    Tabs.Main:AddSection("Knife Throw")
+    getgenv().auto_throw_enabled = false
+    getgenv().throw_distance = 300
+    getgenv().throw_cooldown = 2
+    local thrThread
+    local lastThrow = 0
+
+    local function throwKnife(tgtChar)
+        local tool = Player.Character and Player.Character:FindFirstChildOfClass("Tool")
+        if not tool or not tool:FindFirstChild("RightHandle") then return end
+        local hrp = tgtChar:FindFirstChild("HumanoidRootPart")
+        if not hrp then return end
+        local origin = CharacterRayOrigin(Player.Character)
+        if not origin then return end
+        local dir = (hrp.Position - origin).Unit
+        pcall(function() ReplicatedStorage.Remotes.ThrowStart:FireServer(origin, dir) end)
+        local ok, ctrl = pcall(function() return require(ReplicatedStorage.Modules.KnifeProjectileController) end)
+        if ok and ctrl then
+            pcall(function()
+                ctrl({
+                    Speed = tool:GetAttribute("ThrowSpeed"),
+                    KnifeProjectile = tool.RightHandle:Clone(),
+                    Direction = dir,
+                    Origin = origin,
+                }, function(r)
+                    pcall(function()
+                        ReplicatedStorage.Remotes.ThrowHit:FireServer(r and r.Instance, r and r.Position)
+                    end)
+                end)
+            end)
+        end
+        lastThrow = tick()
+    end
+
+    Tabs.Main:AddToggle("AutoThrow", {
+        Title = "Enable Auto Throw Knife",
+        Default = false,
+    }):OnChanged(function(v)
+        getgenv().auto_throw_enabled = v
+        FeatureActivated(v)
+        if thrThread then task.cancel(thrThread); thrThread = nil end
+        if v then
+            thrThread = task.spawn(function()
+                while getgenv().auto_throw_enabled and getgenv().INVALIDX_EXEC_TOKEN == EXEC_TOKEN do
+                    if (tick() - lastThrow) >= (tonumber(getgenv().throw_cooldown) or 2) then
+                        local myChar = Player.Character
+                        local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+                        if myRoot then
+                            local best, bestD = nil, tonumber(getgenv().throw_distance) or 300
+                            for _, p in ipairs(matchEnemies) do
+                                if isValidEnemy(p) then
+                                    local eh = p.Character:FindFirstChild("HumanoidRootPart")
+                                    local eh2 = p.Character:FindFirstChild("Humanoid")
+                                    if eh and eh2 and eh2.Health > 0 then
+                                        local d = (eh.Position - myRoot.Position).Magnitude
+                                        if d > 5 and d < bestD then
+                                            local p2 = RaycastParams.new()
+                                            p2.FilterDescendantsInstances = {myChar, p.Character}
+                                            p2.FilterType = Enum.RaycastFilterType.Exclude
+                                            local r = workspace:Raycast(myRoot.Position, eh.Position - myRoot.Position, p2)
+                                            if not r then bestD = d; best = p.Character end
+                                        end
+                                    end
+                                end
+                            end
+                            if best then throwKnife(best) end
                         end
-                        if t:GetAttribute("Cooldown") ~= 0 then t:SetAttribute("Cooldown", 0) end
+                    end
+                    task.wait(0.1)
+                end
+            end)
+        end
+    end)
+
+    Tabs.Main:AddSlider("ThrowDist", { Title = "Max Throw Distance", Min = 0, Max = 1000, Default = 300, Rounding = 0,
+        }):OnChanged(function(v) getgenv().throw_distance = tonumber(v) or 300 end)
+    Tabs.Main:AddSlider("ThrowCD", { Title = "Throw Cooldown", Min = 0.5, Max = 10, Default = 2, Rounding = 1,
+        }):OnChanged(function(v) getgenv().throw_cooldown = tonumber(v) or 2 end)
+
+    -- TRIGGER BOT
+    Tabs.Main:AddSection("Trigger Bot")
+    getgenv().triggerbot_enabled = false
+    getgenv().triggerbot_firing = false
+    getgenv().triggerbot_cooldown = 1
+
+    RunService.Heartbeat:Connect(function()
+        if not getgenv().triggerbot_enabled or not getgenv().match then return end
+        if getgenv().triggerbot_firing or not canShoot then return end
+        local c = Player.Character
+        if not c then return end
+        local mp = UserInputService:GetMouseLocation()
+        local ray = Camera:ViewportPointToRay(mp.X, mp.Y)
+        local rp = RaycastParams.new()
+        rp.FilterType = Enum.RaycastFilterType.Exclude
+        rp.FilterDescendantsInstances = {c}
+        rp.IgnoreWater = true
+        local res = Workspace:Raycast(ray.Origin, ray.Direction * 2000, rp)
+        if not res then return end
+        local hitModel = res.Instance:FindFirstAncestorOfClass("Model")
+        if not hitModel then return end
+        local hitPlayer = Players:GetPlayerFromCharacter(hitModel)
+        if not hitPlayer or not isValidEnemy(hitPlayer) then return end
+        getgenv().triggerbot_firing = true
+        ShootGun(hitPlayer)
+        task.delay(tonumber(getgenv().triggerbot_cooldown) or 1, function()
+            getgenv().triggerbot_firing = false
+        end)
+    end)
+
+    Tabs.Main:AddToggle("TriggerBot", { Title = "Trigger Bot", Default = false,
+        }):OnChanged(function(v) getgenv().triggerbot_enabled = v; FeatureActivated(v) end)
+    Tabs.Main:AddSlider("TriggerCD", { Title = "Trigger Cooldown", Min = 0, Max = 3, Default = 1, Rounding = 1,
+        }):OnChanged(function(v) getgenv().triggerbot_cooldown = tonumber(v) or 1 end)
+
+    -- HITBOX
+    Tabs.Main:AddSection("Hitbox Expander")
+    getgenv().hitbox_expander = false
+    getgenv().hitbox_size = 13
+    getgenv().hitbox_color = Color3.fromRGB(255, 0, 0)
+
+    Tabs.Main:AddToggle("HitboxExp", { Title = "Enable Hitbox Expander", Default = false,
+        }):OnChanged(function(v)
+            getgenv().hitbox_expander = v
+            FeatureActivated(v)
+            if not v then
+                for _, p in ipairs(matchEnemies) do
+                    if p ~= Player then
+                        local c = p.Character
+                        local hrp = c and c:FindFirstChild("HumanoidRootPart")
+                        if hrp then
+                            hrp.Size = Vector3.new(2,2,1); hrp.CanCollide = false
+                            local hb = hrp:FindFirstChild("hit_box"); if hb then hb:Destroy() end
+                        end
+                    end
+                end
+                return
+            end
+            task.spawn(function()
+                while getgenv().hitbox_expander and getgenv().INVALIDX_EXEC_TOKEN == EXEC_TOKEN do
+                    task.wait(0.1)
+                    local sz = tonumber(getgenv().hitbox_size) or 13
+                    for _, p in ipairs(matchEnemies) do
+                        if p ~= Player and p.Character and p.Team ~= Player.Team then
+                            local hrp = p.Character:FindFirstChild("HumanoidRootPart")
+                            if hrp then
+                                hrp.Size = Vector3.new(sz, sz, sz)
+                                hrp.CanCollide = true
+                                local hb = hrp:FindFirstChild("hit_box")
+                                if not hb then
+                                    hb = Instance.new("BoxHandleAdornment")
+                                    hb.Name = "hit_box"; hb.Adornee = hrp; hb.AlwaysOnTop = true
+                                    hb.ZIndex = 10; hb.Size = hrp.Size
+                                    hb.Color3 = getgenv().hitbox_color; hb.Transparency = 0.8
+                                    hb.Parent = hrp
+                                else
+                                    hb.Size = hrp.Size; hb.Color3 = getgenv().hitbox_color
+                                end
+                            end
+                        end
                     end
                 end
             end)
-        else
-            for t, cd in pairs(getgenv().original_cooldowns) do
-                if t and t.Parent then t:SetAttribute("Cooldown", cd) end
-            end
-            getgenv().original_cooldowns = {}
-        end
-    end)
+        end)
 
--- ═══════════════════════════════════════════════════════════════
---  ─────────────  AIM TAB  ─────────────
--- ═══════════════════════════════════════════════════════════════
-Tabs.Aim:AddSection("Silent Aim")
+    Tabs.Main:AddSlider("HitboxSize", { Title = "Hitbox Size", Min = 5, Max = 100, Default = 13, Rounding = 0,
+        }):OnChanged(function(v) getgenv().hitbox_size = tonumber(v) or 13 end)
+    Tabs.Main:AddColorpicker("HitboxColor", { Title = "Hitbox Color", Default = getgenv().hitbox_color,
+        }):OnChanged(function(c) getgenv().hitbox_color = c end)
 
-Tabs.Aim:AddToggle("SilentAim", { Title = "Enable Silent Aim", Description = "Redirects shots to a nearby target", Default = false,
-    }):OnChanged(function(v) getgenv().silent_aim_enabled = v; FeatureActivated(v) end)
-Tabs.Aim:AddSlider("SAFOV", { Title = "Aim FOV", Min = 50, Max = 1000, Default = 200, Rounding = 0,
-    }):OnChanged(function(v) getgenv().silent_aim_fov = v end)
-Tabs.Aim:AddSlider("SADist", { Title = "Max Distance", Min = 100, Max = 2000, Default = 500, Rounding = 0,
-    }):OnChanged(function(v) getgenv().silent_aim_distance = v end)
-Tabs.Aim:AddDropdown("SATarget", {
-    Title = "Target Part",
-    Values = {"Head", "UpperTorso", "LowerTorso", "HumanoidRootPart"},
-    Default = 1,
-    Multi = false,
-}):OnChanged(function(v) getgenv().silent_aim_target_part = v end)
-Tabs.Aim:AddToggle("SAIgnoreFriends", { Title = "Ignore Friends", Default = true,
-    }):OnChanged(function(v) getgenv().silent_aim_ignore_friends = v end)
-
--- Silent aim target finder loop
-task.spawn(function()
-    while getgenv().INVALIDX_EXEC_TOKEN == EXEC_TOKEN do
-        task.wait(0.05)
-        if getgenv().silent_aim_enabled and getgenv().match then
-            local myChar = Player.Character
-            local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
-            if myRoot and Camera then
-                local mp = UserInputService:GetMouseLocation()
-                local best, bestD = nil, getgenv().silent_aim_fov
-                for _, p in ipairs(matchEnemies) do
-                    if p ~= Player and p.Team ~= Player.Team and p.Character then
-                        local skip = false
-                        if getgenv().silent_aim_ignore_friends then
-                            local ok, isFriend = pcall(function() return p:IsFriendsWith(Player.UserId) end)
-                            if ok and isFriend then skip = true end
+    -- GUN COOLDOWN
+    Tabs.Main:AddSection("Gun Cooldown")
+    getgenv().original_cooldowns = {}
+    getgenv().remove_gun_cooldown = false
+    Tabs.Main:AddToggle("RemoveGunCD", { Title = "Remove Gun Cooldown", Default = false,
+        }):OnChanged(function(v)
+            getgenv().remove_gun_cooldown = v
+            FeatureActivated(v)
+            if v then
+                getgenv().original_cooldowns = {}
+                task.spawn(function()
+                    while getgenv().remove_gun_cooldown and getgenv().INVALIDX_EXEC_TOKEN == EXEC_TOKEN do
+                        task.wait(0.1)
+                        local tools = {}
+                        for _, cont in ipairs({Player:FindFirstChild("Backpack"), Player.Character}) do
+                            if cont then
+                                for _, t in ipairs(cont:GetChildren()) do
+                                    if t:IsA("Tool") and t:FindFirstChild("Fire") then table.insert(tools, t) end
+                                end
+                            end
                         end
-                        if not skip then
-                            local tp = p.Character:FindFirstChild(getgenv().silent_aim_target_part)
-                                or p.Character:FindFirstChild("HumanoidRootPart")
-                            if tp then
-                                local d = (tp.Position - myRoot.Position).Magnitude
-                                if d <= getgenv().silent_aim_distance then
-                                    local sp, onScreen = Camera:WorldToViewportPoint(tp.Position)
-                                    if onScreen then
-                                        local dd = math.sqrt((sp.X - mp.X)^2 + (sp.Y - mp.Y)^2)
-                                        if dd < bestD then bestD = dd; best = p end
+                        for _, t in ipairs(tools) do
+                            if getgenv().original_cooldowns[t] == nil then
+                                getgenv().original_cooldowns[t] = t:GetAttribute("Cooldown")
+                            end
+                            if t:GetAttribute("Cooldown") ~= 0 then
+                                pcall(function() t:SetAttribute("Cooldown", 0) end)
+                            end
+                        end
+                    end
+                end)
+            else
+                for t, cd in pairs(getgenv().original_cooldowns) do
+                    if t and t.Parent then pcall(function() t:SetAttribute("Cooldown", cd) end) end
+                end
+                getgenv().original_cooldowns = {}
+            end
+        end)
+end)
+
+-- ═══════════════════════════════════════════════════════════════
+--  AIM TAB
+-- ═══════════════════════════════════════════════════════════════
+safeBuild("Aim", function()
+    Tabs.Aim:AddSection("Silent Aim")
+
+    Tabs.Aim:AddToggle("SilentAim", { Title = "Enable Silent Aim", Default = false,
+        }):OnChanged(function(v) getgenv().silent_aim_enabled = v; FeatureActivated(v) end)
+    Tabs.Aim:AddSlider("SAFOV", { Title = "Aim FOV", Min = 50, Max = 1000, Default = 200, Rounding = 0,
+        }):OnChanged(function(v) getgenv().silent_aim_fov = tonumber(v) or 200 end)
+    Tabs.Aim:AddSlider("SADist", { Title = "Max Distance", Min = 100, Max = 2000, Default = 500, Rounding = 0,
+        }):OnChanged(function(v) getgenv().silent_aim_distance = tonumber(v) or 500 end)
+    Tabs.Aim:AddDropdown("SATarget", {
+        Title = "Target Part",
+        Values = {"Head", "UpperTorso", "LowerTorso", "HumanoidRootPart"},
+        Default = 1, Multi = false,
+    }):OnChanged(function(v) getgenv().silent_aim_target_part = v end)
+    Tabs.Aim:AddToggle("SAIgnoreFriends", { Title = "Ignore Friends", Default = true,
+        }):OnChanged(function(v) getgenv().silent_aim_ignore_friends = v end)
+
+    task.spawn(function()
+        while getgenv().INVALIDX_EXEC_TOKEN == EXEC_TOKEN do
+            task.wait(0.05)
+            if getgenv().silent_aim_enabled and getgenv().match then
+                local myChar = Player.Character
+                local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+                if myRoot and Camera then
+                    local mp = UserInputService:GetMouseLocation()
+                    local best, bestD = nil, tonumber(getgenv().silent_aim_fov) or 200
+                    local maxDist = tonumber(getgenv().silent_aim_distance) or 500
+                    for _, p in ipairs(matchEnemies) do
+                        if isValidEnemy(p) then
+                            local skip = false
+                            if getgenv().silent_aim_ignore_friends then
+                                local ok, f = pcall(function() return p:IsFriendsWith(Player.UserId) end)
+                                if ok and f then skip = true end
+                            end
+                            if not skip then
+                                local tp = p.Character:FindFirstChild(getgenv().silent_aim_target_part)
+                                    or p.Character:FindFirstChild("HumanoidRootPart")
+                                if tp then
+                                    local d = (tp.Position - myRoot.Position).Magnitude
+                                    if d > 5 and d <= maxDist then
+                                        local sp, on = Camera:WorldToViewportPoint(tp.Position)
+                                        if on then
+                                            local dd = math.sqrt((sp.X - mp.X)^2 + (sp.Y - mp.Y)^2)
+                                            if dd < bestD then bestD = dd; best = p end
+                                        end
                                     end
                                 end
                             end
                         end
                     end
+                    getgenv().INVALIDX_SILENT_TARGET = best
+                else
+                    getgenv().INVALIDX_SILENT_TARGET = nil
                 end
-                getgenv().INVALIDX_SILENT_TARGET = best
             else
                 getgenv().INVALIDX_SILENT_TARGET = nil
             end
-        else
-            getgenv().INVALIDX_SILENT_TARGET = nil
         end
-    end
+    end)
 end)
 
 -- ═══════════════════════════════════════════════════════════════
---  ─────────────  ESP TAB  ─────────────
+--  ESP TAB
 -- ═══════════════════════════════════════════════════════════════
-Tabs.ESP:AddSection("Colors")
-getgenv().esp_team_color = Color3.fromRGB(0, 255, 0)
-getgenv().esp_enemy_color = Color3.fromRGB(255, 0, 0)
+safeBuild("ESP", function()
+    Tabs.ESP:AddSection("Colors")
+    getgenv().esp_team_color = Color3.fromRGB(0, 255, 0)
+    getgenv().esp_enemy_color = Color3.fromRGB(255, 0, 0)
 
-Tabs.ESP:AddColorpicker("EspTeamColor", { Title = "Team Color", Default = getgenv().esp_team_color,
-    }):OnChanged(function(c) getgenv().esp_team_color = c end)
-Tabs.ESP:AddColorpicker("EspEnemyColor", { Title = "Enemy Color", Default = getgenv().esp_enemy_color,
-    }):OnChanged(function(c) getgenv().esp_enemy_color = c end)
+    Tabs.ESP:AddColorpicker("EspTeamColor", { Title = "Team Color", Default = getgenv().esp_team_color,
+        }):OnChanged(function(c) getgenv().esp_team_color = c end)
+    Tabs.ESP:AddColorpicker("EspEnemyColor", { Title = "Enemy Color", Default = getgenv().esp_enemy_color,
+        }):OnChanged(function(c) getgenv().esp_enemy_color = c end)
 
-Tabs.ESP:AddSection("Highlights")
+    Tabs.ESP:AddSection("Highlights")
 
-local charms_esp = CoreGui:FindFirstChild("InvalidX_ESP") or Instance.new("Folder")
-charms_esp.Name = "InvalidX_ESP"; charms_esp.Parent = CoreGui
+    local charms = CoreGui:FindFirstChild("InvalidX_ESP") or Instance.new("Folder")
+    charms.Name = "InvalidX_ESP"; charms.Parent = CoreGui
 
-getgenv().esp_charms_highlighter = false
-Tabs.ESP:AddToggle("Charms", { Title = "Charms Highlighter", Default = false,
-    }):OnChanged(function(v)
-        getgenv().esp_charms_highlighter = v
-        FeatureActivated(v)
-        if not v then
-            for _, c in ipairs(charms_esp:GetChildren()) do c:Destroy() end
-            return
-        end
-        task.spawn(function()
-            while getgenv().esp_charms_highlighter and getgenv().INVALIDX_EXEC_TOKEN == EXEC_TOKEN do
-                task.wait(0.1)
-                for _, p in ipairs(matchEnemies) do
-                    if not getgenv().esp_charms_highlighter then break end
-                    if p ~= Player and p.Character then
-                        local h = charms_esp:FindFirstChild(p.Name)
-                        if not h then
-                            h = Instance.new("Highlight")
-                            h.Name = p.Name
-                            h.FillTransparency = 0.6
-                            h.OutlineTransparency = 0.4
-                            h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-                            h.Parent = charms_esp
+    getgenv().esp_charms_highlighter = false
+    Tabs.ESP:AddToggle("Charms", { Title = "Charms Highlighter", Default = false,
+        }):OnChanged(function(v)
+            getgenv().esp_charms_highlighter = v
+            FeatureActivated(v)
+            if not v then
+                for _, c in ipairs(charms:GetChildren()) do c:Destroy() end
+                return
+            end
+            task.spawn(function()
+                while getgenv().esp_charms_highlighter and getgenv().INVALIDX_EXEC_TOKEN == EXEC_TOKEN do
+                    task.wait(0.1)
+                    for _, p in ipairs(matchEnemies) do
+                        if not getgenv().esp_charms_highlighter then break end
+                        if isValidEnemy(p) then
+                            local h = charms:FindFirstChild(p.Name)
+                            if not h then
+                                h = Instance.new("Highlight")
+                                h.Name = p.Name
+                                h.FillTransparency = 0.6
+                                h.OutlineTransparency = 0.4
+                                h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+                                h.Parent = charms
+                            end
+                            local col = (p.Team == Player.Team) and getgenv().esp_team_color or getgenv().esp_enemy_color
+                            h.FillColor = col; h.OutlineColor = col; h.Adornee = p.Character
                         end
-                        local col = (p.Team == Player.Team) and getgenv().esp_team_color or getgenv().esp_enemy_color
-                        h.FillColor = col; h.OutlineColor = col; h.Adornee = p.Character
                     end
                 end
-            end
+            end)
         end)
-    end)
 
-getgenv().esp_skeleton = false
-local skelFolder = CoreGui:FindFirstChild("InvalidX_Skeletons") or Instance.new("Folder")
-skelFolder.Name = "InvalidX_Skeletons"; skelFolder.Parent = CoreGui
+    local skelFolder = CoreGui:FindFirstChild("InvalidX_Skeletons") or Instance.new("Folder")
+    skelFolder.Name = "InvalidX_Skeletons"; skelFolder.Parent = CoreGui
+    getgenv().esp_skeleton = false
 
-Tabs.ESP:AddToggle("Skeleton", { Title = "Skeleton Highlighter", Default = false,
-    }):OnChanged(function(v)
-        getgenv().esp_skeleton = v
-        FeatureActivated(v)
-        if not v then
-            for _, c in ipairs(skelFolder:GetChildren()) do c:Destroy() end
-            return
-        end
-        task.spawn(function()
-            local bones = {
-                {"Head","UpperTorso"},{"UpperTorso","LowerTorso"},
-                {"UpperTorso","LeftUpperArm"},{"LeftUpperArm","LeftLowerArm"},{"LeftLowerArm","LeftHand"},
-                {"UpperTorso","RightUpperArm"},{"RightUpperArm","RightLowerArm"},{"RightLowerArm","RightHand"},
-                {"LowerTorso","LeftUpperLeg"},{"LeftUpperLeg","LeftLowerLeg"},{"LeftLowerLeg","LeftFoot"},
-                {"LowerTorso","RightUpperLeg"},{"RightUpperLeg","RightLowerLeg"},{"RightLowerLeg","RightFoot"},
-            }
-            while getgenv().esp_skeleton and getgenv().INVALIDX_EXEC_TOKEN == EXEC_TOKEN do
-                task.wait(0.1)
-                for _, p in ipairs(matchEnemies) do
-                    local c = p.Character
-                    local holder = skelFolder:FindFirstChild(p.Name)
-                    if c and c:FindFirstChild("HumanoidRootPart") and c:FindFirstChild("Humanoid") and c.Humanoid.Health > 0 then
-                        if not holder then holder = Instance.new("Folder"); holder.Name = p.Name; holder.Parent = skelFolder end
-                        local col = (p.Team == Player.Team) and getgenv().esp_team_color or getgenv().esp_enemy_color
-                        for i, bp in ipairs(bones) do
-                            local p1, p2 = c:FindFirstChild(bp[1]), c:FindFirstChild(bp[2])
-                            if p1 and p2 then
-                                local line = holder:FindFirstChild(tostring(i))
-                                if not line then
-                                    line = Instance.new("LineHandleAdornment")
-                                    line.Thickness = 2; line.ZIndex = 10; line.AlwaysOnTop = true
-                                    line.Name = tostring(i); line.Parent = holder
-                                end
-                                line.Color3 = col
-                                line.Adornee = p1
-                                line.CFrame = CFrame.new(Vector3.zero, p1.CFrame:PointToObjectSpace(p2.Position))
-                                line.Length = (p1.Position - p2.Position).Magnitude
+    Tabs.ESP:AddToggle("Skeleton", { Title = "Skeleton Highlighter", Default = false,
+        }):OnChanged(function(v)
+            getgenv().esp_skeleton = v
+            FeatureActivated(v)
+            if not v then
+                for _, c in ipairs(skelFolder:GetChildren()) do c:Destroy() end
+                return
+            end
+            task.spawn(function()
+                local bones = {
+                    {"Head","UpperTorso"},{"UpperTorso","LowerTorso"},
+                    {"UpperTorso","LeftUpperArm"},{"LeftUpperArm","LeftLowerArm"},{"LeftLowerArm","LeftHand"},
+                    {"UpperTorso","RightUpperArm"},{"RightUpperArm","RightLowerArm"},{"RightLowerArm","RightHand"},
+                    {"LowerTorso","LeftUpperLeg"},{"LeftUpperLeg","LeftLowerLeg"},{"LeftLowerLeg","LeftFoot"},
+                    {"LowerTorso","RightUpperLeg"},{"RightUpperLeg","RightLowerLeg"},{"RightLowerLeg","RightFoot"},
+                }
+                while getgenv().esp_skeleton and getgenv().INVALIDX_EXEC_TOKEN == EXEC_TOKEN do
+                    task.wait(0.1)
+                    for _, p in ipairs(matchEnemies) do
+                        local c = p.Character
+                        local holder = skelFolder:FindFirstChild(p.Name)
+                        if c and c:FindFirstChild("HumanoidRootPart") and c:FindFirstChild("Humanoid") and c.Humanoid.Health > 0 then
+                            if not holder then
+                                holder = Instance.new("Folder"); holder.Name = p.Name; holder.Parent = skelFolder
                             end
+                            local col = (p.Team == Player.Team) and getgenv().esp_team_color or getgenv().esp_enemy_color
+                            for i, bp in ipairs(bones) do
+                                local p1, p2 = c:FindFirstChild(bp[1]), c:FindFirstChild(bp[2])
+                                if p1 and p2 then
+                                    local line = holder:FindFirstChild(tostring(i))
+                                    if not line then
+                                        line = Instance.new("LineHandleAdornment")
+                                        line.Thickness = 2; line.ZIndex = 10; line.AlwaysOnTop = true
+                                        line.Name = tostring(i); line.Parent = holder
+                                    end
+                                    line.Color3 = col
+                                    line.Adornee = p1
+                                    line.CFrame = CFrame.new(Vector3.zero, p1.CFrame:PointToObjectSpace(p2.Position))
+                                    line.Length = (p1.Position - p2.Position).Magnitude
+                                end
+                            end
+                        elseif holder then
+                            holder:Destroy()
                         end
-                    elseif holder then holder:Destroy() end
+                    end
+                    for _, c in ipairs(skelFolder:GetChildren()) do
+                        if not Players:FindFirstChild(c.Name) then c:Destroy() end
+                    end
                 end
-                for _, c in ipairs(skelFolder:GetChildren()) do
-                    if not Players:FindFirstChild(c.Name) then c:Destroy() end
-                end
-            end
-            for _, c in ipairs(skelFolder:GetChildren()) do c:Destroy() end
+                for _, c in ipairs(skelFolder:GetChildren()) do c:Destroy() end
+            end)
         end)
-    end)
 
-getgenv().esp_tracers = false
-local tracerFolder = CoreGui:FindFirstChild("InvalidX_Tracers") or Instance.new("Folder")
-tracerFolder.Name = "InvalidX_Tracers"; tracerFolder.Parent = CoreGui
-local tracerConn
+    local tracerFolder = CoreGui:FindFirstChild("InvalidX_Tracers") or Instance.new("Folder")
+    tracerFolder.Name = "InvalidX_Tracers"; tracerFolder.Parent = CoreGui
+    local tracerConn
+    getgenv().esp_tracers = false
 
-Tabs.ESP:AddToggle("Tracers", { Title = "Tracers Highlighter", Default = false,
-    }):OnChanged(function(v)
-        getgenv().esp_tracers = v
-        FeatureActivated(v)
-        if tracerConn then tracerConn:Disconnect(); tracerConn = nil end
-        if not v then
-            for _, c in ipairs(tracerFolder:GetChildren()) do c:Destroy() end
-            return
-        end
-        tracerConn = RunService.RenderStepped:Connect(function()
-            if not getgenv().esp_tracers then
-                if tracerConn then tracerConn:Disconnect(); tracerConn = nil end
+    Tabs.ESP:AddToggle("Tracers", { Title = "Tracers Highlighter", Default = false,
+        }):OnChanged(function(v)
+            getgenv().esp_tracers = v
+            FeatureActivated(v)
+            if tracerConn then tracerConn:Disconnect(); tracerConn = nil end
+            if not v then
                 for _, c in ipairs(tracerFolder:GetChildren()) do c:Destroy() end
                 return
             end
-            local myChar = Player.Character
-            local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
-            if myRoot then
-                for _, p in ipairs(matchEnemies) do
-                    if p ~= Player and p.Parent then
-                        local c = p.Character
-                        local tr = tracerFolder:FindFirstChild(p.Name)
-                        if c and c:FindFirstChild("HumanoidRootPart") and c:FindFirstChild("Humanoid") and c.Humanoid.Health > 0 then
-                            if not tr then
-                                tr = Instance.new("LineHandleAdornment")
-                                tr.Name = p.Name
-                                tr.Thickness = 1.5
-                                tr.ZIndex = 10
-                                tr.AlwaysOnTop = true
-                                tr.Parent = tracerFolder
+            tracerConn = RunService.RenderStepped:Connect(function()
+                if not getgenv().esp_tracers then
+                    if tracerConn then tracerConn:Disconnect(); tracerConn = nil end
+                    for _, c in ipairs(tracerFolder:GetChildren()) do c:Destroy() end
+                    return
+                end
+                local myChar = Player.Character
+                local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+                if myRoot then
+                    for _, p in ipairs(matchEnemies) do
+                        if isValidEnemy(p) and p.Parent then
+                            local c = p.Character
+                            local tr = tracerFolder:FindFirstChild(p.Name)
+                            if c and c:FindFirstChild("HumanoidRootPart") and c:FindFirstChild("Humanoid") and c.Humanoid.Health > 0 then
+                                if not tr then
+                                    tr = Instance.new("LineHandleAdornment")
+                                    tr.Name = p.Name
+                                    tr.Thickness = 1.5
+                                    tr.ZIndex = 10
+                                    tr.AlwaysOnTop = true
+                                    tr.Parent = tracerFolder
+                                end
+                                local col = (p.Team == Player.Team) and getgenv().esp_team_color or getgenv().esp_enemy_color
+                                tr.Color3 = col
+                                tr.Adornee = workspace.Terrain
+                                tr.CFrame = CFrame.lookAt(myRoot.Position, c.HumanoidRootPart.Position)
+                                tr.Length = (myRoot.Position - c.HumanoidRootPart.Position).Magnitude
+                            elseif tr then
+                                tr:Destroy()
                             end
-                            local col = (p.Team == Player.Team) and getgenv().esp_team_color or getgenv().esp_enemy_color
-                            tr.Color3 = col
-                            tr.Adornee = workspace.Terrain
-                            tr.CFrame = CFrame.lookAt(myRoot.Position, c.HumanoidRootPart.Position)
-                            tr.Length = (myRoot.Position - c.HumanoidRootPart.Position).Magnitude
-                        elseif tr then tr:Destroy() end
+                        end
+                    end
+                end
+            end)
+        end)
+end)
+
+-- ═══════════════════════════════════════════════════════════════
+--  KILL TAB
+-- ═══════════════════════════════════════════════════════════════
+safeBuild("Kill", function()
+    Tabs.Kill:AddSection("Gun")
+    getgenv().autoKillGun = false
+
+    Tabs.Kill:AddButton({
+        Title = "Kill All (Gun) — Once",
+        Callback = function()
+            if getgenv().match and Player:GetAttribute("Match") then
+                equipGun()
+                Notify("Killing All", "Firing at match enemies", 2)
+                for _, plr in ipairs(matchEnemies) do
+                    if isValidEnemy(plr) and plr.Character and plr.Character:FindFirstChild("HumanoidRootPart") then
+                        local tgt = plr.Character.HumanoidRootPart
+                        local origin = Player.Character and Player.Character:FindFirstChild("HumanoidRootPart")
+                        if origin then
+                            pcall(function()
+                                ReplicatedStorage:WaitForChild("Remotes", 5):WaitForChild("ShootGun", 5)
+                                    :FireServer(origin.Position, tgt.Position, tgt, tgt.Position)
+                            end)
+                        end
+                    end
+                    task.wait(0.1)
+                end
+            end
+        end
+    })
+
+    Tabs.Kill:AddToggle("AutoKillGun", { Title = "Auto Kill (Gun)", Default = false,
+        }):OnChanged(function(v) getgenv().autoKillGun = v; FeatureActivated(v) end)
+
+    task.spawn(function()
+        while getgenv().INVALIDX_EXEC_TOKEN == EXEC_TOKEN do
+            if getgenv().autoKillGun and Player:GetAttribute("Match") then
+                equipGun()
+                for _, plr in ipairs(matchEnemies) do
+                    if isValidEnemy(plr) and plr.Character and plr.Character:FindFirstChild("HumanoidRootPart") then
+                        local tgt = plr.Character.HumanoidRootPart
+                        local origin = Player.Character and Player.Character:FindFirstChild("HumanoidRootPart")
+                        if origin then
+                            pcall(function()
+                                ReplicatedStorage:WaitForChild("Remotes", 5):WaitForChild("ShootGun", 5)
+                                    :FireServer(origin.Position, tgt.Position, tgt, tgt.Position)
+                            end)
+                        end
                     end
                 end
             end
-        end)
+            task.wait(0.1)
+        end
     end)
 
--- ═══════════════════════════════════════════════════════════════
---  ─────────────  KILL TAB  ─────────────
--- ═══════════════════════════════════════════════════════════════
-Tabs.Kill:AddSection("Gun")
+    Tabs.Kill:AddSection("Knife")
+    getgenv().autoKillKnife = false
 
-getgenv().autoKillGun = false
-Tabs.Kill:AddButton({
-    Title = "Kill All (Gun) — Once",
-    Description = "Fires at every match enemy once",
-    Callback = function()
-        if getgenv().match and Player:GetAttribute("Match") then
-            equipGun()
-            Fluent:Notify({ Title = "Killing All", Content = "Firing at match enemies", Duration = 2 })
-            for _, plr in ipairs(matchEnemies) do
-                if plr.Team ~= Player.Team and plr.Character and plr.Character:FindFirstChild("HumanoidRootPart") then
-                    local target = plr.Character.HumanoidRootPart
-                    local origin = Player.Character and Player.Character:FindFirstChild("HumanoidRootPart")
-                    if origin then
-                        pcall(function()
-                            ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("ShootGun")
-                                :FireServer(origin.Position, target.Position, target, target.Position)
-                        end)
+    Tabs.Kill:AddButton({
+        Title = "Kill All (Knife) — Once",
+        Callback = function()
+            if getgenv().match and Player:GetAttribute("Match") then
+                equipKnife()
+                Notify("Killing All", "Knife throwing", 2)
+                for _, t in ipairs(matchEnemies) do
+                    if isValidEnemy(t) and t.Character then
+                        local hum = t.Character:FindFirstChild("Humanoid")
+                        local rp = t.Character:FindFirstChild("HumanoidRootPart")
+                        if hum and hum.Health > 0 and rp then
+                            pcall(function()
+                                ReplicatedStorage:WaitForChild("Remotes", 5):WaitForChild("ThrowHit", 5)
+                                    :FireServer(rp, rp.Position)
+                            end)
+                        end
                     end
-                end
-                task.wait(0.1)
-            end
-        end
-    end
-})
-
-Tabs.Kill:AddToggle("AutoKillGun", { Title = "Auto Kill (Gun)", Default = false,
-    }):OnChanged(function(v) getgenv().autoKillGun = v; FeatureActivated(v) end)
-
-task.spawn(function()
-    while getgenv().INVALIDX_EXEC_TOKEN == EXEC_TOKEN do
-        if getgenv().autoKillGun and Player:GetAttribute("Match") then
-            equipGun()
-            for _, plr in ipairs(matchEnemies) do
-                if plr.Team ~= Player.Team and plr.Character and plr.Character:FindFirstChild("HumanoidRootPart") then
-                    local target = plr.Character.HumanoidRootPart
-                    local origin = Player.Character and Player.Character:FindFirstChild("HumanoidRootPart")
-                    if origin then
-                        pcall(function()
-                            ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("ShootGun")
-                                :FireServer(origin.Position, target.Position, target, target.Position)
-                        end)
-                    end
+                    task.wait(0.1)
                 end
             end
         end
-        task.wait(0.1)
-    end
-end)
+    })
 
-Tabs.Kill:AddSection("Knife")
-getgenv().autoKillKnife = false
-Tabs.Kill:AddButton({
-    Title = "Kill All (Knife) — Once",
-    Description = "Knife-throws at every match enemy once",
-    Callback = function()
-        if getgenv().match and Player:GetAttribute("Match") then
-            equipKnife()
-            Fluent:Notify({ Title = "Killing All", Content = "Knife throwing at match enemies", Duration = 2 })
-            for _, t in ipairs(matchEnemies) do
-                if t ~= Player and t.Character then
-                    local hum = t.Character:FindFirstChild("Humanoid")
-                    local rp = t.Character:FindFirstChild("HumanoidRootPart")
-                    if hum and hum.Health > 0 and rp then
-                        pcall(function()
-                            ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("ThrowHit")
-                                :FireServer(rp, rp.Position)
-                        end)
-                    end
-                end
-                task.wait(0.1)
-            end
-        end
-    end
-})
+    Tabs.Kill:AddToggle("AutoKillKnife", { Title = "Auto Kill (Knife)", Default = false,
+        }):OnChanged(function(v) getgenv().autoKillKnife = v; FeatureActivated(v) end)
 
-Tabs.Kill:AddToggle("AutoKillKnife", { Title = "Auto Kill (Knife)", Default = false,
-    }):OnChanged(function(v) getgenv().autoKillKnife = v; FeatureActivated(v) end)
-
-task.spawn(function()
-    while getgenv().INVALIDX_EXEC_TOKEN == EXEC_TOKEN do
-        if getgenv().autoKillKnife and Player:GetAttribute("Match") then
-            equipKnife()
-            for _, t in ipairs(matchEnemies) do
-                if t ~= Player and t.Character then
-                    local hum = t.Character:FindFirstChild("Humanoid")
-                    local rp = t.Character:FindFirstChild("HumanoidRootPart")
-                    if hum and hum.Health > 0 and rp then
-                        pcall(function()
-                            ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("ThrowHit")
-                                :FireServer(rp, rp.Position)
-                        end)
+    task.spawn(function()
+        while getgenv().INVALIDX_EXEC_TOKEN == EXEC_TOKEN do
+            if getgenv().autoKillKnife and Player:GetAttribute("Match") then
+                equipKnife()
+                for _, t in ipairs(matchEnemies) do
+                    if isValidEnemy(t) and t.Character then
+                        local hum = t.Character:FindFirstChild("Humanoid")
+                        local rp = t.Character:FindFirstChild("HumanoidRootPart")
+                        if hum and hum.Health > 0 and rp then
+                            pcall(function()
+                                ReplicatedStorage:WaitForChild("Remotes", 5):WaitForChild("ThrowHit", 5)
+                                    :FireServer(rp, rp.Position)
+                            end)
+                        end
                     end
                 end
             end
+            task.wait(0.1)
         end
-        task.wait(0.1)
-    end
+    end)
 end)
 
 -- ═══════════════════════════════════════════════════════════════
---  ─────────────  ABILITY TAB  ─────────────
+--  ABILITY TAB
 -- ═══════════════════════════════════════════════════════════════
-Tabs.Ability:AddSection("Shroud")
+safeBuild("Ability", function()
+    Tabs.Ability:AddSection("Shroud")
 
-getgenv().autoShroud = false
-getgenv().lowExecutorsShroud = false
-getgenv().shroudRate = 1
+    getgenv().autoShroud = false
+    getgenv().lowExecutorsShroud = false
+    getgenv().shroudRate = 1
 
-local ConfigSuccess, Config = pcall(function() return require(ReplicatedStorage.Ability.AbilityConfig) end)
-local ActivateShroud = ReplicatedStorage.Ability:WaitForChild("ActivateShroud")
-local isLocked = (not ConfigSuccess)
-local originals = {
-    SprintCooldown = not isLocked and Config.SprintCooldown or 15,
-    DashCooldown = not isLocked and Config.DashCooldown or 6,
-    ShroudCooldown = not isLocked and Config.ShroudCooldown or 7,
-    SoulReapCombatDelay = not isLocked and Config.SoulReapCombatDelay or 0.35,
-}
+    local ConfigSuccess, Config = pcall(function()
+        local a = ReplicatedStorage:FindFirstChild("Ability")
+        if not a then error("no Ability folder") end
+        return require(a.AbilityConfig)
+    end)
+    local isLocked = (not ConfigSuccess)
 
-local function blind(targetPlayer)
-    local c = Player.Character
-    if targetPlayer and targetPlayer.Character and c then
+    local abilityFolder = ReplicatedStorage:FindFirstChild("Ability")
+    local ActivateShroud = abilityFolder and abilityFolder:FindFirstChild("ActivateShroud")
+
+    local originals = {
+        SprintCooldown = (not isLocked) and Config.SprintCooldown or 15,
+        DashCooldown = (not isLocked) and Config.DashCooldown or 6,
+        ShroudCooldown = (not isLocked) and Config.ShroudCooldown or 7,
+        SoulReapCombatDelay = (not isLocked) and Config.SoulReapCombatDelay or 0.35,
+    }
+
+    local function blind(targetPlayer)
+        if not ActivateShroud then return end
+        local c = Player.Character
+        if not (targetPlayer and targetPlayer.Character and c) then return end
         local tp = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
         local root = c:FindFirstChild("HumanoidRootPart")
-        if tp and root then
-            local origin, dir
-            if getgenv().lowExecutorsShroud then
+        if not (tp and root) then return end
+        local origin, dir
+        if getgenv().lowExecutorsShroud then
+            origin = root.Position
+            dir = (tp.Position - origin).Unit
+            pcall(function() ActivateShroud:FireServer(origin, dir) end)
+        else
+            local s1, CRM = pcall(function()
+                return require(ReplicatedStorage.Modules.CharacterRayOrigin)
+            end)
+            local s2, SPC = pcall(function()
+                return require(ReplicatedStorage.Ability.ShroudProjectileController)
+            end)
+            if s1 and s2 then
+                origin = CRM(c)
+                dir = (tp.Position - origin).Unit
+                pcall(function() ActivateShroud:FireServer(origin, dir) end)
+                pcall(function() SPC(origin, dir) end)
+            else
+                getgenv().lowExecutorsShroud = true
                 origin = root.Position
                 dir = (tp.Position - origin).Unit
-                ActivateShroud:FireServer(origin, dir)
-            else
-                local s1, CRM = pcall(function() return require(ReplicatedStorage.Modules.CharacterRayOrigin) end)
-                local s2, SPC = pcall(function() return require(ReplicatedStorage.Ability.ShroudProjectileController) end)
-                if s1 and s2 then
-                    origin = CRM(c)
-                    dir = (tp.Position - origin).Unit
-                    ActivateShroud:FireServer(origin, dir)
-                    SPC(origin, dir)
-                else
-                    getgenv().lowExecutorsShroud = true
-                    origin = root.Position
-                    dir = (tp.Position - origin).Unit
-                    ActivateShroud:FireServer(origin, dir)
-                end
+                pcall(function() ActivateShroud:FireServer(origin, dir) end)
             end
         end
     end
-end
 
-Tabs.Ability:AddToggle("AutoShroud", { Title = "Auto Shroud All", Default = false,
-    }):OnChanged(function(v) getgenv().autoShroud = v; FeatureActivated(v) end)
-Tabs.Ability:AddToggle("LowExec", { Title = "Low Executor Mode", Description = "Faster, no shroud visual", Default = false,
-    }):OnChanged(function(v) getgenv().lowExecutorsShroud = v end)
-Tabs.Ability:AddSlider("ShroudRate", { Title = "Shrouds per Enemy", Min = 1, Max = 100, Default = 1, Rounding = 0,
-    }):OnChanged(function(v) getgenv().shroudRate = v end)
+    Tabs.Ability:AddToggle("AutoShroud", { Title = "Auto Shroud All", Default = false,
+        }):OnChanged(function(v) getgenv().autoShroud = v; FeatureActivated(v) end)
+    Tabs.Ability:AddToggle("LowExec", { Title = "Low Executor Mode", Default = false,
+        }):OnChanged(function(v) getgenv().lowExecutorsShroud = v end)
+    Tabs.Ability:AddSlider("ShroudRate", { Title = "Shrouds per Enemy", Min = 1, Max = 100, Default = 1, Rounding = 0,
+        }):OnChanged(function(v) getgenv().shroudRate = tonumber(v) or 1 end)
 
-task.spawn(function()
-    while getgenv().INVALIDX_EXEC_TOKEN == EXEC_TOKEN do
-        if getgenv().autoShroud then
-            for _, p in ipairs(matchEnemies) do blind(p) end
-            task.wait(1 / getgenv().shroudRate)
-        else
-            task.wait(0.5)
+    task.spawn(function()
+        while getgenv().INVALIDX_EXEC_TOKEN == EXEC_TOKEN do
+            if getgenv().autoShroud then
+                for _, p in ipairs(matchEnemies) do blind(p) end
+                task.wait(1 / (tonumber(getgenv().shroudRate) or 1))
+            else
+                task.wait(0.5)
+            end
         end
+    end)
+
+    if isLocked then
+        Tabs.Ability:AddParagraph({
+            Title = "Executor Notice",
+            Content = "AbilityConfig not accessible — cooldown/stats locked.",
+        })
     end
+
+    Tabs.Ability:AddSection("Cooldowns")
+    Tabs.Ability:AddToggle("RemoveSprintCD", { Title = "Remove Sprint Cooldown", Default = false,
+        }):OnChanged(function(v)
+            FeatureActivated(v)
+            if not isLocked then Config.SprintCooldown = v and 0 or originals.SprintCooldown else NotSupportedFeature() end
+        end)
+    Tabs.Ability:AddToggle("RemoveDashCD", { Title = "Remove Dash Cooldown", Default = false,
+        }):OnChanged(function(v)
+            FeatureActivated(v)
+            if not isLocked then Config.DashCooldown = v and 0 or originals.DashCooldown else NotSupportedFeature() end
+        end)
+    Tabs.Ability:AddToggle("RemoveShroudCD", { Title = "Remove Shroud Cooldown", Default = false,
+        }):OnChanged(function(v)
+            FeatureActivated(v)
+            if not isLocked then Config.ShroudCooldown = v and 0 or originals.ShroudCooldown else NotSupportedFeature() end
+        end)
+    Tabs.Ability:AddToggle("RemoveSoulReap", { Title = "Remove Soul Reap Delay", Default = false,
+        }):OnChanged(function(v)
+            FeatureActivated(v)
+            if not isLocked then Config.SoulReapCombatDelay = v and 0 or originals.SoulReapCombatDelay else NotSupportedFeature() end
+        end)
+
+    Tabs.Ability:AddSection("Stat Boosts")
+    Tabs.Ability:AddSlider("SprintTime", { Title = "Sprint Time", Min = 0.5, Max = 10, Default = 0.5, Rounding = 1,
+        }):OnChanged(function(v) if not isLocked then Config.SprintTime = tonumber(v) or 0.5 else NotSupportedFeature() end end)
+    Tabs.Ability:AddSlider("SprintBoost", { Title = "Sprint Boost", Min = 0, Max = 5, Default = 0, Rounding = 1,
+        }):OnChanged(function(v) if not isLocked then Config.SprintBoost = tonumber(v) or 0 else NotSupportedFeature() end end)
+    Tabs.Ability:AddSlider("SoulReapTime", { Title = "Soul Reap Time", Min = 0.5, Max = 10, Default = 0.5, Rounding = 1,
+        }):OnChanged(function(v) if not isLocked then Config.SoulReapTime = tonumber(v) or 0.5 else NotSupportedFeature() end end)
+    Tabs.Ability:AddSlider("SoulReapSpeed", { Title = "Soul Reap Speed", Min = 0.1, Max = 10, Default = 0.1, Rounding = 1,
+        }):OnChanged(function(v) if not isLocked then Config.SoulReapSpeedBoost = tonumber(v) or 0.1 else NotSupportedFeature() end end)
+    Tabs.Ability:AddSlider("PropellerBoost", { Title = "Propeller Jump Boost", Min = 0.1, Max = 5, Default = 0.1, Rounding = 1,
+        }):OnChanged(function(v) if not isLocked then Config.PropellerJumpBoost = tonumber(v) or 0.1 else NotSupportedFeature() end end)
+    Tabs.Ability:AddSlider("ShroudTime", { Title = "Shroud Time", Min = 0.5, Max = 10, Default = 0.5, Rounding = 1,
+        }):OnChanged(function(v) if not isLocked then Config.ShroudTime = tonumber(v) or 0.5 else NotSupportedFeature() end end)
+    Tabs.Ability:AddSlider("ShroudProjSpeed", { Title = "Shroud Proj Speed", Min = 2.5, Max = 100, Default = 2.5, Rounding = 1,
+        }):OnChanged(function(v) if not isLocked then Config.ShroudProjectileSpeed = tonumber(v) or 2.5 else NotSupportedFeature() end end)
+    Tabs.Ability:AddSlider("ShroudProjRange", { Title = "Shroud Proj Range", Min = 5, Max = 1000, Default = 5, Rounding = 0,
+        }):OnChanged(function(v) if not isLocked then Config.ShroudProjectileRange = tonumber(v) or 5 else NotSupportedFeature() end end)
 end)
 
-if isLocked then
-    Tabs.Ability:AddParagraph({
-        Title = "Executor Notice",
-        Content = "AbilityConfig not accessible — cooldown/stats features locked.",
-    })
-end
-
-Tabs.Ability:AddSection("Cooldowns")
-Tabs.Ability:AddToggle("RemoveSprintCD", { Title = "Remove Sprint Cooldown", Default = false,
-    }):OnChanged(function(v)
-        FeatureActivated(v)
-        if not isLocked then Config.SprintCooldown = v and 0 or originals.SprintCooldown else NotSupportedFeature() end
-    end)
-Tabs.Ability:AddToggle("RemoveDashCD", { Title = "Remove Dash Cooldown", Default = false,
-    }):OnChanged(function(v)
-        FeatureActivated(v)
-        if not isLocked then Config.DashCooldown = v and 0 or originals.DashCooldown else NotSupportedFeature() end
-    end)
-Tabs.Ability:AddToggle("RemoveShroudCD", { Title = "Remove Shroud Cooldown", Default = false,
-    }):OnChanged(function(v)
-        FeatureActivated(v)
-        if not isLocked then Config.ShroudCooldown = v and 0 or originals.ShroudCooldown else NotSupportedFeature() end
-    end)
-Tabs.Ability:AddToggle("RemoveSoulReap", { Title = "Remove Soul Reap Delay", Default = false,
-    }):OnChanged(function(v)
-        FeatureActivated(v)
-        if not isLocked then Config.SoulReapCombatDelay = v and 0 or originals.SoulReapCombatDelay else NotSupportedFeature() end
-    end)
-
-Tabs.Ability:AddSection("Stat Boosts")
-Tabs.Ability:AddSlider("SprintTime", { Title = "Sprint Time", Min = 0.5, Max = 10, Default = 0.5, Rounding = 1,
-    }):OnChanged(function(v) if not isLocked then Config.SprintTime = v else NotSupportedFeature() end end)
-Tabs.Ability:AddSlider("SprintBoost", { Title = "Sprint Boost", Min = 0, Max = 5, Default = 0, Rounding = 1,
-    }):OnChanged(function(v) if not isLocked then Config.SprintBoost = v else NotSupportedFeature() end end)
-Tabs.Ability:AddSlider("SoulReapTime", { Title = "Soul Reap Time", Min = 0.5, Max = 10, Default = 0.5, Rounding = 1,
-    }):OnChanged(function(v) if not isLocked then Config.SoulReapTime = v else NotSupportedFeature() end end)
-Tabs.Ability:AddSlider("SoulReapSpeed", { Title = "Soul Reap Speed", Min = 0.1, Max = 10, Default = 0.1, Rounding = 1,
-    }):OnChanged(function(v) if not isLocked then Config.SoulReapSpeedBoost = v else NotSupportedFeature() end end)
-Tabs.Ability:AddSlider("PropellerBoost", { Title = "Propeller Jump Boost", Min = 0.1, Max = 5, Default = 0.1, Rounding = 1,
-    }):OnChanged(function(v) if not isLocked then Config.PropellerJumpBoost = v else NotSupportedFeature() end end)
-Tabs.Ability:AddSlider("ShroudTime", { Title = "Shroud Time", Min = 0.5, Max = 10, Default = 0.5, Rounding = 1,
-    }):OnChanged(function(v) if not isLocked then Config.ShroudTime = v else NotSupportedFeature() end end)
-Tabs.Ability:AddSlider("ShroudProjSpeed", { Title = "Shroud Proj Speed", Min = 2.5, Max = 100, Default = 2.5, Rounding = 1,
-    }):OnChanged(function(v) if not isLocked then Config.ShroudProjectileSpeed = v else NotSupportedFeature() end end)
-Tabs.Ability:AddSlider("ShroudProjRange", { Title = "Shroud Proj Range", Min = 5, Max = 1000, Default = 5, Rounding = 0,
-    }):OnChanged(function(v) if not isLocked then Config.ShroudProjectileRange = v else NotSupportedFeature() end end)
-
 -- ═══════════════════════════════════════════════════════════════
---  ─────────────  TELEPORT TAB  ─────────────
+--  TELEPORT TAB
 -- ═══════════════════════════════════════════════════════════════
-Tabs.Teleport:AddSection("Auto Walk")
+safeBuild("Teleport", function()
+    Tabs.Teleport:AddSection("Auto Walk")
 
-local lobby = workspace:WaitForChild("Lobby")
-local groups = { DuelRing_1v1 = 1, DuelRing_2v2 = 2, DuelRing_3v3 = 3, DuelRing_4v4 = 4 }
-local autoWalkToDuelPad = false
-local currentPadModel = nil
-local lastJumpTime = 0
+    local lobby = workspace:FindFirstChild("Lobby")
+    local groups = { DuelRing_1v1 = 1, DuelRing_2v2 = 2, DuelRing_3v3 = 3, DuelRing_4v4 = 4 }
+    local autoWalkToDuelPad = false
+    local currentPadModel = nil
+    local lastJumpTime = 0
 
-local function walkTo(model)
-    local c = Player.Character
-    if not c then return end
-    local hum = c:FindFirstChildOfClass("Humanoid")
-    local rp = c:FindFirstChild("HumanoidRootPart")
-    if hum and rp and model and model.PrimaryPart then
-        local tp = model.PrimaryPart.Position
-        local d = (rp.Position - tp).Magnitude
-        if d <= 6 then
-            getgenv().noclip = false
-            for _, p in ipairs(c:GetDescendants()) do
-                if p:IsA("BasePart") then p.CanCollide = true end
+    if not lobby then
+        Tabs.Teleport:AddParagraph({
+            Title = "Lobby Not Loaded",
+            Content = "Teleport needs the Lobby. It'll work once you join.",
+        })
+    end
+
+    local function walkTo(model)
+        local c = Player.Character
+        if not c then return end
+        local hum = c:FindFirstChildOfClass("Humanoid")
+        local rp = c:FindFirstChild("HumanoidRootPart")
+        if hum and rp and model and model.PrimaryPart then
+            local tp = model.PrimaryPart.Position
+            local d = (rp.Position - tp).Magnitude
+            if d <= 6 then
+                getgenv().noclip = false
+                for _, p in ipairs(c:GetDescendants()) do
+                    if p:IsA("BasePart") then p.CanCollide = true end
+                end
+                return
             end
-            return
-        end
-        hum.WalkSpeed = 35
-        hum:MoveTo(tp)
-        if os.clock() - lastJumpTime >= 2 then hum.Jump = true; lastJumpTime = os.clock() end
-        getgenv().noclip = true
-        for _, p in ipairs(c:GetDescendants()) do
-            if p:IsA("BasePart") then p.CanCollide = false end
+            hum.WalkSpeed = 35
+            hum:MoveTo(tp)
+            if os.clock() - lastJumpTime >= 2 then hum.Jump = true; lastJumpTime = os.clock() end
+            getgenv().noclip = true
+            for _, p in ipairs(c:GetDescendants()) do
+                if p:IsA("BasePart") then p.CanCollide = false end
+            end
         end
     end
-end
 
-Tabs.Teleport:AddToggle("AutoWalk", { Title = "Auto Walk to Duel Pads", Default = false,
-    }):OnChanged(function(v) autoWalkToDuelPad = v; FeatureActivated(v) end)
+    Tabs.Teleport:AddToggle("AutoWalk", { Title = "Auto Walk to Duel Pads", Default = false,
+        }):OnChanged(function(v) autoWalkToDuelPad = v; FeatureActivated(v) end)
 
-task.spawn(function()
-    while getgenv().INVALIDX_EXEC_TOKEN == EXEC_TOKEN do
-        task.wait(0.2)
-        if not Player:GetAttribute("Match") and autoWalkToDuelPad then
-            local c = Player.Character
-            local rp = c and c:FindFirstChild("HumanoidRootPart")
-            if currentPadModel and rp then
-                local currentMax = 1
-                for gName, mx in pairs(groups) do
-                    if lobby:FindFirstChild("DuelRingsGroup") and lobby.DuelRingsGroup:FindFirstChild(gName) then
-                        if lobby.DuelRingsGroup[gName]:FindFirstChild(currentPadModel.Name) then
+    task.spawn(function()
+        while getgenv().INVALIDX_EXEC_TOKEN == EXEC_TOKEN do
+            task.wait(0.2)
+            if not lobby then lobby = workspace:FindFirstChild("Lobby") end
+            if lobby and not Player:GetAttribute("Match") and autoWalkToDuelPad then
+                local c = Player.Character
+                local rp = c and c:FindFirstChild("HumanoidRootPart")
+                if currentPadModel and rp then
+                    local currentMax = 1
+                    for gName, mx in pairs(groups) do
+                        local rl = lobby:FindFirstChild("DuelRingsGroup")
+                        if rl and rl:FindFirstChild(gName) and rl[gName]:FindFirstChild(currentPadModel.Name) then
                             currentMax = mx; break
                         end
                     end
-                end
-                if currentMax == 1 then
-                    local found = false
-                    for _, op in ipairs(Players:GetPlayers()) do
-                        if op ~= Player and op.Character then
-                            local oh = op.Character:FindFirstChild("HumanoidRootPart")
-                            if oh and (rp.Position - oh.Position).Magnitude <= 8 then found = true; break end
+                    if currentMax == 1 then
+                        local found = false
+                        for _, op in ipairs(Players:GetPlayers()) do
+                            if op ~= Player and op.Character then
+                                local oh = op.Character:FindFirstChild("HumanoidRootPart")
+                                if oh and (rp.Position - oh.Position).Magnitude <= 8 then found = true; break end
+                            end
                         end
+                        if not found then currentPadModel = nil end
                     end
-                    if not found then currentPadModel = nil end
                 end
-            end
-            if not currentPadModel then
-                for _, gf in ipairs(lobby:GetChildren()) do
-                    if gf.Name == "DuelRingsGroup" then
-                        for gName, mx in pairs(groups) do
-                            local rf = gf:FindFirstChild(gName)
-                            if rf then
-                                local pads, total = {}, 0
-                                local maxP = mx * 2
-                                for _, m in ipairs(rf:GetChildren()) do
-                                    if m:IsA("Model") and m.Name == "DuelPad" then
-                                        local cnt = m:GetAttribute("CharacterCount") or 0
-                                        total = total + cnt
-                                        table.insert(pads, {model = m, count = cnt})
+                if not currentPadModel then
+                    for _, gf in ipairs(lobby:GetChildren()) do
+                        if gf.Name == "DuelRingsGroup" then
+                            for gName, mx in pairs(groups) do
+                                local rf = gf:FindFirstChild(gName)
+                                if rf then
+                                    local pads, total = {}, 0
+                                    local maxP = mx * 2
+                                    for _, m in ipairs(rf:GetChildren()) do
+                                        if m:IsA("Model") and m.Name == "DuelPad" then
+                                            local cnt = m:GetAttribute("CharacterCount") or 0
+                                            total = total + cnt
+                                            table.insert(pads, {model = m, count = cnt})
+                                        end
                                     end
-                                end
-                                if total == maxP - 1 then
-                                    for _, pad in ipairs(pads) do
-                                        if pad.count < mx then
-                                            local oppReady = true
-                                            if mx == 1 then
-                                                oppReady = false
-                                                for _, op in ipairs(Players:GetPlayers()) do
-                                                    if op ~= Player and op.Character and pad.model.PrimaryPart then
-                                                        local oh = op.Character:FindFirstChild("HumanoidRootPart")
-                                                        if oh and (oh.Position - pad.model.PrimaryPart.Position).Magnitude <= 8 then
-                                                            oppReady = true; break
+                                    if total == maxP - 1 then
+                                        for _, pad in ipairs(pads) do
+                                            if pad.count < mx then
+                                                local oppReady = true
+                                                if mx == 1 then
+                                                    oppReady = false
+                                                    for _, op in ipairs(Players:GetPlayers()) do
+                                                        if op ~= Player and op.Character and pad.model.PrimaryPart then
+                                                            local oh = op.Character:FindFirstChild("HumanoidRootPart")
+                                                            if oh and (oh.Position - pad.model.PrimaryPart.Position).Magnitude <= 8 then
+                                                                oppReady = true; break
+                                                            end
                                                         end
                                                     end
                                                 end
-                                            end
-                                            if oppReady then
-                                                walkTo(pad.model)
-                                                if rp and pad.model.PrimaryPart then
-                                                    if (rp.Position - pad.model.PrimaryPart.Position).Magnitude <= 6 then
-                                                        currentPadModel = pad.model
+                                                if oppReady then
+                                                    walkTo(pad.model)
+                                                    if rp and pad.model.PrimaryPart then
+                                                        if (rp.Position - pad.model.PrimaryPart.Position).Magnitude <= 6 then
+                                                            currentPadModel = pad.model
+                                                        end
                                                     end
+                                                    break
                                                 end
-                                                break
                                             end
                                         end
                                     end
@@ -1182,226 +1247,302 @@ task.spawn(function()
                         end
                     end
                 end
+            else
+                currentPadModel = nil
             end
-        else
-            currentPadModel = nil
-        end
-    end
-end)
-
-Tabs.Teleport:AddSection("Duel Pads")
-if lobby and lobby:FindFirstChild("DuelRingsGroup") then
-    for gName, _ in pairs(groups) do
-        local rf = lobby.DuelRingsGroup:FindFirstChild(gName)
-        if rf then
-            local idx = 1
-            for _, m in ipairs(rf:GetChildren()) do
-                if m:IsA("Model") and m.Name == "DuelPad" then
-                    local side = (idx % 2 == 1) and "Right" or "Left"
-                    Tabs.Teleport:AddButton({
-                        Title = "Walk to " .. gName .. " " .. side,
-                        Callback = function()
-                            Fluent:Notify({ Title = "Walking", Content = "Heading to " .. gName .. " " .. side, Duration = 2 })
-                            walkTo(m)
-                        end
-                    })
-                    idx = idx + 1
-                end
-            end
-        end
-    end
-end
-
--- ═══════════════════════════════════════════════════════════════
---  ─────────────  FOV TAB  ─────────────
--- ═══════════════════════════════════════════════════════════════
-Tabs.FOV:AddSection("FOV Shooting")
-
-local fov_autoshoot = false
-local fov_manual = false
-local fov_circle_on = false
-local fov_radius = 100
-local fov_cd = 1
-local fov_last = 0
-local fov_circle
-
-local function createCircle()
-    if fov_circle then pcall(function() fov_circle:Remove() end) end
-    fov_circle = Drawing.new("Circle")
-    fov_circle.Thickness = 2
-    fov_circle.NumSides = 64
-    fov_circle.Radius = fov_radius
-    fov_circle.Color = Color3.fromRGB(255, 31, 61)
-    fov_circle.Transparency = 1
-    fov_circle.Visible = false
-    fov_circle.Filled = false
-end
-createCircle()
-
-local function updCircle()
-    if fov_circle and (fov_circle_on or fov_autoshoot or fov_manual) then
-        local mp = UserInputService:GetMouseLocation()
-        fov_circle.Position = Vector2.new(mp.X, mp.Y)
-        fov_circle.Radius = fov_radius
-        fov_circle.Visible = true
-    elseif fov_circle then
-        fov_circle.Visible = false
-    end
-end
-
-local function inFov(pos)
-    local sp, on = Camera:WorldToViewportPoint(pos)
-    if not on then return false end
-    local mp = UserInputService:GetMouseLocation()
-    return math.sqrt((sp.X - mp.X)^2 + (sp.Y - mp.Y)^2) <= fov_radius
-end
-
-local function fovShoot(t)
-    local myChar = Player.Character
-    local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
-    local thrp = t.Character and t.Character:FindFirstChild("HumanoidRootPart")
-    if not (myRoot and thrp) then return false end
-    if not hasClearLOS(myRoot.Position, thrp.Position, myChar, t.Character) then return false end
-    if not inFov(thrp.Position) then return false end
-    if tick() - fov_last < fov_cd then return false end
-    local hp = t.Character:FindFirstChild("LowerTorso") or t.Character:FindFirstChild("UpperTorso") or t.Character:FindFirstChild("Head")
-    if hp then ShootGun(t); fov_last = tick(); return true end
-    return false
-end
-
-RunService.Heartbeat:Connect(function()
-    updCircle()
-    if not fov_autoshoot then return end
-    for _, e in ipairs(Players:GetPlayers()) do
-        if isValidEnemy(e) and fovShoot(e) then break end
-    end
-end)
-
-UserInputService.InputBegan:Connect(function(input, gpe)
-    if gpe then return end
-    if fov_manual and input.UserInputType == Enum.UserInputType.MouseButton1 then
-        for _, e in ipairs(Players:GetPlayers()) do
-            if isValidEnemy(e) and fovShoot(e) then break end
-        end
-    end
-end)
-
-Tabs.FOV:AddToggle("FovCircle", { Title = "Show FOV Circle", Default = false,
-    }):OnChanged(function(v) fov_circle_on = v end)
-Tabs.FOV:AddToggle("FovAuto", { Title = "Auto Shoot FOV", Default = false,
-    }):OnChanged(function(v) fov_autoshoot = v; FeatureActivated(v) end)
-Tabs.FOV:AddToggle("FovManual", { Title = "Manual Shoot FOV", Default = false,
-    }):OnChanged(function(v) fov_manual = v; FeatureActivated(v) end)
-Tabs.FOV:AddSlider("FovRadius", { Title = "FOV Radius", Min = 35, Max = 300, Default = 100, Rounding = 0,
-    }):OnChanged(function(v) fov_radius = v end)
-Tabs.FOV:AddSlider("FovCD", { Title = "FOV Cooldown", Min = 0, Max = 5, Default = 2, Rounding = 1,
-    }):OnChanged(function(v) fov_cd = v end)
-
--- ═══════════════════════════════════════════════════════════════
---  ─────────────  MISC TAB  ─────────────
--- ═══════════════════════════════════════════════════════════════
-Tabs.Misc:AddSection("Movement")
-
-getgenv().original_speed = 16
-getgenv().speed_enabled = false
-getgenv().current_speed = 16
-
-Tabs.Misc:AddToggle("Noclip", { Title = "Noclip", Default = false,
-    }):OnChanged(function(v)
-        getgenv().noclip = v
-        FeatureActivated(v)
-        if v then
-            local conn
-            conn = RunService.Stepped:Connect(function()
-                if not getgenv().noclip then conn:Disconnect(); return end
-                local c = Player.Character
-                if c then
-                    for _, p in ipairs(c:GetDescendants()) do
-                        if p:IsA("BasePart") then p.CanCollide = false end
-                    end
-                end
-            end)
         end
     end)
 
-Tabs.Misc:AddToggle("SpeedChanger", { Title = "Speed Changer", Default = false,
-    }):OnChanged(function(v)
-        getgenv().speed_enabled = v
-        FeatureActivated(v)
-        if v then
-            task.spawn(function()
-                while getgenv().speed_enabled and getgenv().INVALIDX_EXEC_TOKEN == EXEC_TOKEN do
+    Tabs.Teleport:AddSection("Duel Pads")
+    if lobby and lobby:FindFirstChild("DuelRingsGroup") then
+        for gName, _ in pairs(groups) do
+            local rf = lobby.DuelRingsGroup:FindFirstChild(gName)
+            if rf then
+                local idx = 1
+                for _, m in ipairs(rf:GetChildren()) do
+                    if m:IsA("Model") and m.Name == "DuelPad" then
+                        local side = (idx % 2 == 1) and "Right" or "Left"
+                        Tabs.Teleport:AddButton({
+                            Title = "Walk to " .. gName .. " " .. side,
+                            Callback = function()
+                                Notify("Walking", "Heading to " .. gName .. " " .. side, 2)
+                                walkTo(m)
+                            end
+                        })
+                        idx = idx + 1
+                    end
+                end
+            end
+        end
+    end
+end)
+
+-- ═══════════════════════════════════════════════════════════════
+--  FOV TAB  (GuiObject circle, self-safe targeting)
+-- ═══════════════════════════════════════════════════════════════
+safeBuild("FOV", function()
+    Tabs.FOV:AddSection("FOV Shooting")
+
+    local fov_autoshoot = false
+    local fov_manual = false
+    local fov_circle_on = false
+    local fov_radius = 100
+    local fov_cd = 2
+    local fov_last = 0
+    local anchor_mode = "Mouse"
+
+    local circleGui = Instance.new("ScreenGui")
+    circleGui.Name = "InvalidX_FOVCircle"
+    circleGui.ResetOnSpawn = false
+    circleGui.IgnoreGuiInset = true
+    circleGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    circleGui.DisplayOrder = 100
+    circleGui.Parent = CoreGui
+
+    local circleFrame = Instance.new("Frame", circleGui)
+    circleFrame.BackgroundTransparency = 1
+    circleFrame.BorderSizePixel = 0
+    circleFrame.Visible = false
+    circleFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+
+    local corner = Instance.new("UICorner", circleFrame)
+    corner.CornerRadius = UDim.new(0.5, 0)
+
+    local stroke = Instance.new("UIStroke", circleFrame)
+    stroke.Thickness = 2
+    stroke.Color = Color3.fromRGB(255, 31, 61)
+    stroke.Transparency = 0
+
+    local mousePos = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+    UserInputService.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement then
+            mousePos = Vector2.new(input.Position.X, input.Position.Y)
+        end
+    end)
+    pcall(function()
+        local mp = UserInputService:GetMouseLocation()
+        if mp and mp.X and mp.Y and mp.X > 0 and mp.Y > 0 then
+            mousePos = Vector2.new(mp.X, mp.Y)
+        end
+    end)
+
+    local function getAnchor()
+        if anchor_mode == "Center" then
+            return Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+        end
+        return mousePos
+    end
+
+    local function updateCircle()
+        if not circleFrame then return end
+        local visible = fov_circle_on or fov_autoshoot or fov_manual
+        circleFrame.Visible = visible
+        if not visible then return end
+        local r = tonumber(fov_radius) or 100
+        circleFrame.Size = UDim2.fromOffset(r * 2, r * 2)
+        local a = getAnchor()
+        circleFrame.Position = UDim2.fromOffset(a.X, a.Y)
+    end
+
+    local function inFov(pos)
+        local sp, on = Camera:WorldToViewportPoint(pos)
+        if not on then return false end
+        local a = getAnchor()
+        local r = tonumber(fov_radius) or 100
+        return math.sqrt((sp.X - a.X)^2 + (sp.Y - a.Y)^2) <= r
+    end
+
+    local function fovValidEnemy(e)
+        if not e then return false end
+        if e == Player or e == Players.LocalPlayer then return false end
+        local c = e.Character
+        if not c or c == Player.Character then return false end
+        local h = c:FindFirstChild("Humanoid")
+        if not h or h.Health <= 0 then return false end
+        if e.Team and Player.Team and e.Team == Player.Team then return false end
+        if Collection:HasTag(c, "Invulnerable") or Collection:HasTag(c, "SpeedTrail") then return false end
+        return true
+    end
+
+    local function fovShoot(t)
+        if not t or t == Player or t == Players.LocalPlayer then return false end
+        local myChar = Player.Character
+        local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+        local thrp = t.Character and t.Character:FindFirstChild("HumanoidRootPart")
+        if not (myRoot and thrp) then return false end
+        local dist = (thrp.Position - myRoot.Position).Magnitude
+        if dist < 5 then return false end
+        if not hasClearLOS(myRoot.Position, thrp.Position, myChar, t.Character) then return false end
+        if not inFov(thrp.Position) then return false end
+        local cd = tonumber(fov_cd) or 2
+        if tick() - fov_last < cd then return false end
+        local hp = t.Character:FindFirstChild("LowerTorso")
+            or t.Character:FindFirstChild("UpperTorso")
+            or t.Character:FindFirstChild("Head")
+        if hp then ShootGun(t); fov_last = tick(); return true end
+        return false
+    end
+
+    RunService.RenderStepped:Connect(function() pcall(updateCircle) end)
+
+    RunService.Heartbeat:Connect(function()
+        if not fov_autoshoot then return end
+        for _, e in ipairs(Players:GetPlayers()) do
+            if fovValidEnemy(e) and fovShoot(e) then break end
+        end
+    end)
+
+    UserInputService.InputBegan:Connect(function(input, gpe)
+        if gpe then return end
+        if fov_manual and input.UserInputType == Enum.UserInputType.MouseButton1 then
+            for _, e in ipairs(Players:GetPlayers()) do
+                if fovValidEnemy(e) and fovShoot(e) then break end
+            end
+        end
+    end)
+
+    Tabs.FOV:AddToggle("FovCircle", { Title = "Show FOV Circle", Default = false,
+        }):OnChanged(function(v) fov_circle_on = v end)
+    Tabs.FOV:AddDropdown("FovAnchor", {
+        Title = "Circle Anchor",
+        Values = {"Mouse", "Center"},
+        Default = 1, Multi = false,
+    }):OnChanged(function(v) anchor_mode = v end)
+    Tabs.FOV:AddToggle("FovAuto", { Title = "Auto Shoot FOV", Default = false,
+        }):OnChanged(function(v) fov_autoshoot = v; FeatureActivated(v) end)
+    Tabs.FOV:AddToggle("FovManual", { Title = "Manual Shoot FOV", Default = false,
+        }):OnChanged(function(v) fov_manual = v; FeatureActivated(v) end)
+    Tabs.FOV:AddSlider("FovRadius", { Title = "FOV Radius", Min = 35, Max = 300, Default = 100, Rounding = 0,
+        }):OnChanged(function(v) fov_radius = tonumber(v) or 100 end)
+    Tabs.FOV:AddSlider("FovCD", { Title = "FOV Cooldown", Min = 0, Max = 5, Default = 2, Rounding = 1,
+        }):OnChanged(function(v) fov_cd = tonumber(v) or 2 end)
+
+    getgenv().INVALIDX_FOV_GUI = circleGui
+end)
+
+-- ═══════════════════════════════════════════════════════════════
+--  MISC TAB
+-- ═══════════════════════════════════════════════════════════════
+safeBuild("Misc", function()
+    Tabs.Misc:AddSection("Movement")
+
+    getgenv().original_speed = 16
+    getgenv().speed_enabled = false
+    getgenv().current_speed = 16
+
+    Tabs.Misc:AddToggle("Noclip", { Title = "Noclip", Default = false,
+        }):OnChanged(function(v)
+            getgenv().noclip = v
+            FeatureActivated(v)
+            if v then
+                local conn
+                conn = RunService.Stepped:Connect(function()
+                    if not getgenv().noclip then conn:Disconnect(); return end
                     local c = Player.Character
-                    local h = c and c:FindFirstChild("Humanoid")
-                    if h and h.WalkSpeed ~= getgenv().current_speed then
-                        h.WalkSpeed = getgenv().current_speed
+                    if c then
+                        for _, p in ipairs(c:GetDescendants()) do
+                            if p:IsA("BasePart") then p.CanCollide = false end
+                        end
+                    end
+                end)
+            end
+        end)
+
+    Tabs.Misc:AddToggle("SpeedChanger", { Title = "Speed Changer", Default = false,
+        }):OnChanged(function(v)
+            getgenv().speed_enabled = v
+            FeatureActivated(v)
+            if v then
+                task.spawn(function()
+                    while getgenv().speed_enabled and getgenv().INVALIDX_EXEC_TOKEN == EXEC_TOKEN do
+                        local c = Player.Character
+                        local h = c and c:FindFirstChild("Humanoid")
+                        if h and h.WalkSpeed ~= getgenv().current_speed then
+                            h.WalkSpeed = getgenv().current_speed
+                        end
+                        task.wait(0.1)
+                    end
+                end)
+            else
+                local c = Player.Character
+                local h = c and c:FindFirstChild("Humanoid")
+                if h then h.WalkSpeed = getgenv().original_speed end
+            end
+        end)
+
+    Tabs.Misc:AddSlider("WalkSpeed", { Title = "Walk Speed", Min = 16, Max = 200, Default = 16, Rounding = 0,
+        }):OnChanged(function(v) getgenv().current_speed = tonumber(v) or 16 end)
+
+    Tabs.Misc:AddSection("Automation")
+    Tabs.Misc:AddToggle("AutoSpin", { Title = "Auto Spin", Default = false,
+        }):OnChanged(function(v)
+            getgenv().autoSpin = v
+            FeatureActivated(v)
+            task.spawn(function()
+                while getgenv().autoSpin and getgenv().INVALIDX_EXEC_TOKEN == EXEC_TOKEN do
+                    if not Player:GetAttribute("Match") then
+                        pcall(function()
+                            require(ReplicatedStorage.Dailies.SpinnerService).Spin()
+                        end)
                     end
                     task.wait(0.1)
                 end
             end)
-        else
-            local c = Player.Character
-            local h = c and c:FindFirstChild("Humanoid")
-            if h then h.WalkSpeed = getgenv().original_speed end
-        end
-    end)
+        end)
 
-Tabs.Misc:AddSlider("WalkSpeed", { Title = "Walk Speed", Min = 16, Max = 200, Default = 16, Rounding = 0,
-    }):OnChanged(function(v) getgenv().current_speed = v end)
-
-Tabs.Misc:AddSection("Automation")
-Tabs.Misc:AddToggle("AutoSpin", { Title = "Auto Spin", Default = false,
-    }):OnChanged(function(v)
-        getgenv().autoSpin = v
-        FeatureActivated(v)
-        task.spawn(function()
-            while getgenv().autoSpin and getgenv().INVALIDX_EXEC_TOKEN == EXEC_TOKEN do
-                if not Player:GetAttribute("Match") then
-                    pcall(function()
-                        require(ReplicatedStorage.Dailies.SpinnerService).Spin()
+    Tabs.Misc:AddToggle("AntiAFK", { Title = "Anti-AFK", Default = true,
+        }):OnChanged(function(v)
+            getgenv().antiafk = v
+            if v then
+                task.spawn(function()
+                    local vu = game:GetService("VirtualUser")
+                    Player.Idled:Connect(function()
+                        vu:CaptureController()
+                        vu:ClickButton2(Vector2.new())
                     end)
-                end
-                task.wait(0.1)
+                end)
             end
         end)
-    end)
 
-Tabs.Misc:AddToggle("AntiAFK", { Title = "Anti-AFK", Default = true,
-    }):OnChanged(function(v)
-        getgenv().antiafk = v
-        if v then
-            task.spawn(function()
-                local vu = game:GetService("VirtualUser")
-                Player.Idled:Connect(function()
-                    vu:CaptureController()
-                    vu:ClickButton2(Vector2.new())
-                end)
-            end)
+    Player.CharacterAdded:Connect(function(c)
+        task.wait(0.2)
+        if getgenv().speed_enabled then
+            local h = c:WaitForChild("Humanoid", 5)
+            if h then h.WalkSpeed = getgenv().current_speed end
         end
     end)
-
-Player.CharacterAdded:Connect(function(c)
-    task.wait(0.2)
-    if getgenv().speed_enabled then
-        local h = c:WaitForChild("Humanoid")
-        h.WalkSpeed = getgenv().current_speed
-    end
 end)
 
 -- ═══════════════════════════════════════════════════════════════
---  ─────────────  SETTINGS TAB  ─────────────
+--  SETTINGS TAB
 -- ═══════════════════════════════════════════════════════════════
-InterfaceManager:SetLibrary(Fluent)
-SaveManager:SetLibrary(Fluent)
-SaveManager:IgnoreThemeSettings()
-SaveManager:SetIgnoreIndexes({})
-InterfaceManager:SetFolder("InvalidXMVSD")
-SaveManager:SetFolder("InvalidXMVSD/Configs")
-InterfaceManager:BuildInterfaceSection(Tabs.Settings)
-SaveManager:BuildConfigSection(Tabs.Settings)
+safeBuild("Settings", function()
+    if InterfaceManager then
+        pcall(function()
+            InterfaceManager:SetLibrary(Fluent)
+            InterfaceManager:SetFolder("InvalidXMVSD")
+            InterfaceManager:BuildInterfaceSection(Tabs.Settings)
+        end)
+    end
+    if SaveManager then
+        pcall(function()
+            SaveManager:SetLibrary(Fluent)
+            SaveManager:IgnoreThemeSettings()
+            SaveManager:SetIgnoreIndexes({})
+            SaveManager:SetFolder("InvalidXMVSD/Configs")
+            SaveManager:BuildConfigSection(Tabs.Settings)
+        end)
+    end
+    if not InterfaceManager and not SaveManager then
+        Tabs.Settings:AddParagraph({
+            Title = "Addons Missing",
+            Content = "Config save/load not available.",
+        })
+    end
+end)
 
 Window:SelectTab(1)
-SaveManager:LoadAutoloadConfig()
+pcall(function() SaveManager:LoadAutoloadConfig() end)
 
 -- ═══════════════════════════════════════════════════════════════
 --  UNLOAD
@@ -1409,14 +1550,18 @@ SaveManager:LoadAutoloadConfig()
 getgenv().InvalidX_Unload = function()
     getgenv().INVALIDX_EXEC_TOKEN = nil
     getgenv().INVALIDX_MVSD_LOADED = nil
-    if not isLocked then
-        pcall(function()
-            Config.SprintCooldown = originals.SprintCooldown
-            Config.DashCooldown = originals.DashCooldown
-            Config.ShroudCooldown = originals.ShroudCooldown
-            Config.SoulReapCombatDelay = originals.SoulReapCombatDelay
-        end)
-    end
+    pcall(function()
+        local abilityFolder = ReplicatedStorage:FindFirstChild("Ability")
+        if abilityFolder then
+            local ok, Config = pcall(function() return require(abilityFolder.AbilityConfig) end)
+            if ok and Config then
+                Config.SprintCooldown = 15
+                Config.DashCooldown = 6
+                Config.ShroudCooldown = 7
+                Config.SoulReapCombatDelay = 0.35
+            end
+        end
+    end)
     for t, cd in pairs(getgenv().original_cooldowns or {}) do
         if t and t.Parent then pcall(function() t:SetAttribute("Cooldown", cd) end) end
     end
@@ -1425,15 +1570,14 @@ getgenv().InvalidX_Unload = function()
         local b = CoreGui:FindFirstChild("InvalidX_Skeletons"); if b then b:Destroy() end
         local c = CoreGui:FindFirstChild("InvalidX_Tracers"); if c then c:Destroy() end
     end)
-    if fov_circle then pcall(function() fov_circle:Remove() end) end
+    if getgenv().INVALIDX_FOV_GUI then
+        pcall(function() getgenv().INVALIDX_FOV_GUI:Destroy() end)
+    end
     pcall(function() Window:Destroy() end)
     print("[InvalidX] Unloaded.")
 end
 
-Fluent:Notify({
-    Title = "InvalidX | MVSD v4.1",
-    Content = "Fluent UI loaded. RightCtrl to minimize. Type InvalidX_Unload() to remove.",
-    Duration = 8,
-})
-
-print("[InvalidX] MVSD v4.1 (Fluent) loaded. Token: " .. EXEC_TOKEN)
+Notify("InvalidX | MVSD v6.0", "Full release loaded. RightCtrl to minimize.", 6)
+print("[InvalidX] MVSD v6.0 loaded. Token: " .. EXEC_TOKEN)
+print("[InvalidX] Drawing supported: " .. tostring(HAS_DRAWING))
+print("[InvalidX] Mobile detected: " .. tostring(IS_MOBILE))
