@@ -1,0 +1,1075 @@
+--[[
+    InvalidX | Auto Piano Player v3.1
+    Clean rebuild — smaller UI, fixed sheet detection
+--]]
+
+if getgenv().INVALIDX_PIANO_LOADED then return end
+getgenv().INVALIDX_PIANO_LOADED = true
+
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local HttpService = game:GetService("HttpService")
+local CoreGui = game:GetService("CoreGui")
+
+local IS_MOBILE = UserInputService.TouchEnabled and not UserInputService.MouseEnabled
+local HAS_FILE_IO = typeof(writefile) == "function" and typeof(readfile) == "function"
+
+-- ═══════════════════════════════════════════════════════════════
+--  CONFIG
+-- ═══════════════════════════════════════════════════════════════
+local CONFIG_FILE = "InvalidX_Piano_Config.json"
+local SHEET_FOLDER = "InvalidX_Piano_Sheets"
+local DEFAULTS = {
+    Speed = 1.0, KeyHold = 0.04, ChordArpeggio = 0.0, Humanize = 0,
+    Transpose = 0, Countdown = 3, Loop = false, AntiAFK = true,
+    AutoHide = false, Theme = "Purple", UIScale = 1.0,
+    LastSheet = "",
+}
+local CURRENT = {}
+
+local function loadConfig()
+    local loaded = nil
+    if HAS_FILE_IO and isfile(CONFIG_FILE) then
+        local ok, data = pcall(readfile, CONFIG_FILE)
+        if ok and #data > 0 then
+            local ok2, dec = pcall(function() return HttpService:JSONDecode(data) end)
+            if ok2 and typeof(dec) == "table" then loaded = dec end
+        end
+    end
+    for k, v in pairs(DEFAULTS) do
+        CURRENT[k] = (loaded and loaded[k] ~= nil) and loaded[k] or v
+    end
+end
+
+local function saveConfig()
+    if not HAS_FILE_IO then return end
+    local ok, data = pcall(function() return HttpService:JSONEncode(CURRENT) end)
+    if ok then pcall(writefile, CONFIG_FILE, data) end
+end
+
+loadConfig()
+
+if HAS_FILE_IO then
+    pcall(function()
+        if typeof(makefolder) == "function" then pcall(makefolder, SHEET_FOLDER) end
+        pcall(function() writefile(SHEET_FOLDER .. "/.keep", "") end)
+    end)
+end
+
+-- ═══════════════════════════════════════════════════════════════
+--  THEMES
+-- ═══════════════════════════════════════════════════════════════
+local THEMES = {
+    Purple = { Bg = Color3.fromRGB(18,18,26), Element = Color3.fromRGB(28,28,40), Hover = Color3.fromRGB(38,38,55), Accent = Color3.fromRGB(160,100,255), Text = Color3.fromRGB(235,235,245), SubText = Color3.fromRGB(140,140,165) },
+    Red    = { Bg = Color3.fromRGB(24,14,16), Element = Color3.fromRGB(36,22,26), Hover = Color3.fromRGB(50,30,36), Accent = Color3.fromRGB(240,80,100), Text = Color3.fromRGB(245,235,235), SubText = Color3.fromRGB(180,150,155) },
+    Blue   = { Bg = Color3.fromRGB(14,18,28), Element = Color3.fromRGB(24,32,46), Hover = Color3.fromRGB(34,44,62), Accent = Color3.fromRGB(90,150,240), Text = Color3.fromRGB(235,240,250), SubText = Color3.fromRGB(150,165,195) },
+    Green  = { Bg = Color3.fromRGB(14,22,18), Element = Color3.fromRGB(24,36,30), Hover = Color3.fromRGB(34,50,42), Accent = Color3.fromRGB(90,210,140), Text = Color3.fromRGB(235,245,240), SubText = Color3.fromRGB(150,190,170) },
+    Mono   = { Bg = Color3.fromRGB(16,16,16), Element = Color3.fromRGB(26,26,26), Hover = Color3.fromRGB(40,40,40), Accent = Color3.fromRGB(200,200,200), Text = Color3.fromRGB(235,235,235), SubText = Color3.fromRGB(140,140,140) },
+    Gold   = { Bg = Color3.fromRGB(22,20,14), Element = Color3.fromRGB(36,32,22), Hover = Color3.fromRGB(50,44,30), Accent = Color3.fromRGB(240,190,80), Text = Color3.fromRGB(250,245,230), SubText = Color3.fromRGB(200,180,150) },
+}
+local function T() return THEMES[CURRENT.Theme] or THEMES.Purple end
+
+-- ═══════════════════════════════════════════════════════════════
+--  KEYCODE MAPS
+-- ═══════════════════════════════════════════════════════════════
+local LETTER_MAP = {
+    a = Enum.KeyCode.A, b = Enum.KeyCode.B, c = Enum.KeyCode.C, d = Enum.KeyCode.D,
+    e = Enum.KeyCode.E, f = Enum.KeyCode.F, g = Enum.KeyCode.G, h = Enum.KeyCode.H,
+    i = Enum.KeyCode.I, j = Enum.KeyCode.J, k = Enum.KeyCode.K, l = Enum.KeyCode.L,
+    m = Enum.KeyCode.M, n = Enum.KeyCode.N, o = Enum.KeyCode.O, p = Enum.KeyCode.P,
+    q = Enum.KeyCode.Q, r = Enum.KeyCode.R, s = Enum.KeyCode.S, t = Enum.KeyCode.T,
+    u = Enum.KeyCode.U, v = Enum.KeyCode.V, w = Enum.KeyCode.W, x = Enum.KeyCode.X,
+    y = Enum.KeyCode.Y, z = Enum.KeyCode.Z,
+    ["0"] = Enum.KeyCode.Zero, ["1"] = Enum.KeyCode.One, ["2"] = Enum.KeyCode.Two,
+    ["3"] = Enum.KeyCode.Three, ["4"] = Enum.KeyCode.Four, ["5"] = Enum.KeyCode.Five,
+    ["6"] = Enum.KeyCode.Six, ["7"] = Enum.KeyCode.Seven, ["8"] = Enum.KeyCode.Eight,
+    ["9"] = Enum.KeyCode.Nine,
+}
+local SHIFT_MAP = {
+    ["!"] = Enum.KeyCode.One, ["@"] = Enum.KeyCode.Two, ["#"] = Enum.KeyCode.Three,
+    ["$"] = Enum.KeyCode.Four, ["%"] = Enum.KeyCode.Five, ["^"] = Enum.KeyCode.Six,
+    ["&"] = Enum.KeyCode.Seven, ["*"] = Enum.KeyCode.Eight, ["("] = Enum.KeyCode.Nine,
+    [")"] = Enum.KeyCode.Zero,
+}
+local TRANSPOSE_ROWS = {
+    { "1", "2", "3", "4", "5", "6", "7", "8", "9", "0" },
+    { "q", "w", "e", "r", "t", "y", "u", "i", "o", "p" },
+    { "a", "s", "d", "f", "g", "h", "j", "k", "l", ";" },
+    { "z", "x", "c", "v", "b", "n", "m", ",", ".", "/" },
+}
+
+local function charToKeys(ch)
+    if ch == "" then return {} end
+    local lower = ch:lower()
+    if LETTER_MAP[lower] then return { LETTER_MAP[lower] } end
+    if SHIFT_MAP[ch] then return { Enum.KeyCode.LeftShift, SHIFT_MAP[ch] } end
+    return {}
+end
+
+local function transposeChar(ch, steps)
+    if steps == 0 then return ch end
+    local isShift = ch:match("[!@#%$%%%^&*%(%)]") ~= nil
+    local base = ch:lower()
+    for rowIdx, row in ipairs(TRANSPOSE_ROWS) do
+        for colIdx, key in ipairs(row) do
+            if key == base then
+                local newCol = math.clamp(colIdx + steps, 1, 10)
+                local newKey = TRANSPOSE_ROWS[rowIdx][newCol]
+                if isShift and newKey:match("[1-90]") then
+                    local symMap = {["1"]="!",["2"]="@",["3"]="#",["4"]="$",["5"]="%",["6"]="^",["7"]="&",["8"]="*",["9"]="(",["0"]=")"}
+                    return symMap[newKey] or newKey
+                end
+                return newKey
+            end
+        end
+    end
+    return ch
+end
+
+local function applyTranspose(sheet, steps)
+    if steps == 0 then return sheet end
+    return (sheet:gsub("[%a%d!@#%$%%%^&*%(%)]", function(c) return transposeChar(c, steps) end))
+end
+
+-- ═══════════════════════════════════════════════════════════════
+--  PARSER
+-- ═══════════════════════════════════════════════════════════════
+local function parseSheet(sheet)
+    local events = {}
+    local i, len = 1, #sheet
+    while i <= len do
+        local c = sheet:sub(i, i)
+        if c == "#" then
+            local nl = sheet:find("\n", i)
+            i = nl and nl + 1 or len + 1
+        elseif c == "[" then
+            local close = sheet:find("]", i)
+            if not close then break end
+            local inside = sheet:sub(i + 1, close - 1)
+            local keys = {}
+            for k = 1, #inside do
+                local ch = inside:sub(k, k)
+                if ch ~= " " and ch ~= "\n" and ch ~= "\r" then
+                    for _, kc in ipairs(charToKeys(ch)) do table.insert(keys, kc) end
+                end
+            end
+            if #keys > 0 then table.insert(events, { keys = keys, wait = 0.02 }) end
+            i = close + 1
+        elseif c == "-" then
+            local dashes = 1
+            if sheet:sub(i + 1, i + 1) == "-" then dashes = 2 end
+            table.insert(events, { keys = {}, wait = dashes == 2 and 0.35 or 0.15 })
+            i = i + dashes
+        elseif c:match("[%a%d]") then
+            table.insert(events, { keys = charToKeys(c), wait = 0.02 })
+            i = i + 1
+        elseif SHIFT_MAP[c] then
+            table.insert(events, { keys = charToKeys(c), wait = 0.02 })
+            i = i + 1
+        elseif c == "|" or c == "\n" or c == "\r" then
+            table.insert(events, { keys = {}, wait = 0.08 })
+            i = i + 1
+        elseif c == " " then
+            table.insert(events, { keys = {}, wait = 0.03 })
+            i = i + 1
+        else
+            i = i + 1
+        end
+    end
+    return events
+end
+
+local function estimateDuration(events, speed)
+    local total = 0
+    for _, ev in ipairs(events) do
+        total = total + (ev.wait or 0.02) + 0.02
+    end
+    return total / (speed or 1)
+end
+
+local function formatTime(sec)
+    sec = math.max(0, math.floor(sec))
+    return string.format("%d:%02d", math.floor(sec / 60), sec % 60)
+end
+
+-- ═══════════════════════════════════════════════════════════════
+--  STATE
+-- ═══════════════════════════════════════════════════════════════
+local sheetText = CURRENT.LastSheet or ""
+local isPlaying, stopFlag, playThread = false, false, nil
+local currentEvents, currentIndex, playStartTime, estimatedDuration = nil, 0, 0, 0
+local autoHid = false
+
+-- ═══════════════════════════════════════════════════════════════
+--  PLAYBACK
+-- ═══════════════════════════════════════════════════════════════
+local function pressKeys(keys)
+    for _, kc in ipairs(keys) do
+        pcall(function() VirtualInputManager:SendKeyEvent(true, kc, false, game) end)
+    end
+end
+local function releaseKeys(keys)
+    for _, kc in ipairs(keys) do
+        pcall(function() VirtualInputManager:SendKeyEvent(false, kc, false, game) end)
+    end
+end
+
+-- ═══════════════════════════════════════════════════════════════
+--  UI
+-- ═══════════════════════════════════════════════════════════════
+local ui = Instance.new("ScreenGui")
+ui.Name = "InvalidX_Piano"
+ui.ResetOnSpawn = false
+ui.IgnoreGuiInset = true
+ui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+ui.Parent = CoreGui
+
+local W, H = 400, 520
+if IS_MOBILE then W, H = 340, 460 end
+
+local win = Instance.new("Frame")
+win.Size = UDim2.new(0, W, 0, H)
+win.Position = UDim2.new(0.5, -W/2, 0.5, -H/2)
+win.BackgroundColor3 = T().Bg
+win.BorderSizePixel = 0
+win.Active = true
+win.ClipsDescendants = true
+win.Parent = ui
+Instance.new("UICorner", win).CornerRadius = UDim.new(0, 10)
+
+local scale = Instance.new("UIScale", win)
+scale.Scale = tonumber(CURRENT.UIScale) or 1
+
+local stroke = Instance.new("UIStroke", win)
+stroke.Thickness = 1.5
+stroke.Color = T().Accent
+
+-- Title row (compact)
+local titleRow = Instance.new("Frame")
+titleRow.Size = UDim2.new(1, 0, 0, 34)
+titleRow.BackgroundTransparency = 1
+titleRow.Parent = win
+
+local titleLbl = Instance.new("TextLabel")
+titleLbl.Size = UDim2.new(1, -80, 1, 0)
+titleLbl.Position = UDim2.new(0, 12, 0, 0)
+titleLbl.BackgroundTransparency = 1
+titleLbl.Font = Enum.Font.GothamBold
+titleLbl.Text = "Auto Piano Player"
+titleLbl.TextColor3 = T().Text
+titleLbl.TextSize = 14
+titleLbl.TextXAlignment = Enum.TextXAlignment.Left
+titleLbl.Parent = titleRow
+
+local minBtn = Instance.new("TextButton")
+minBtn.Size = UDim2.new(0, 24, 0, 24)
+minBtn.Position = UDim2.new(1, -58, 0, 5)
+minBtn.BackgroundColor3 = T().Element
+minBtn.BorderSizePixel = 0
+minBtn.Font = Enum.Font.GothamBold
+minBtn.Text = "—"
+minBtn.TextColor3 = T().Text
+minBtn.TextSize = 14
+minBtn.Parent = titleRow
+Instance.new("UICorner", minBtn).CornerRadius = UDim.new(0, 6)
+
+local closeBtn = Instance.new("TextButton")
+closeBtn.Size = UDim2.new(0, 24, 0, 24)
+closeBtn.Position = UDim2.new(1, -30, 0, 5)
+closeBtn.BackgroundColor3 = Color3.fromRGB(180, 50, 60)
+closeBtn.BorderSizePixel = 0
+closeBtn.Font = Enum.Font.GothamBold
+closeBtn.Text = "×"
+closeBtn.TextColor3 = Color3.fromRGB(255,255,255)
+closeBtn.TextSize = 16
+closeBtn.Parent = titleRow
+Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 6)
+
+-- Tab row
+local tabRow = Instance.new("Frame")
+tabRow.Size = UDim2.new(1, -16, 0, 26)
+tabRow.Position = UDim2.new(0, 8, 0, 36)
+tabRow.BackgroundTransparency = 1
+tabRow.Parent = win
+
+local tabNames = { "SHEET", "OPTIONS", "SAVE", "INFO" }
+local tabBtns = {}
+local currentTabName = "SHEET"
+
+-- Content area
+local content = Instance.new("ScrollingFrame")
+content.Size = UDim2.new(1, -16, 1, -224)
+content.Position = UDim2.new(0, 8, 0, 66)
+content.BackgroundTransparency = 1
+content.BorderSizePixel = 0
+content.ScrollBarThickness = 3
+content.ScrollBarImageColor3 = T().Accent
+content.CanvasSize = UDim2.new(0, 0, 0, 0)
+content.AutomaticCanvasSize = Enum.AutomaticSize.Y
+content.Parent = win
+
+local layout = Instance.new("UIListLayout", content)
+layout.Padding = UDim.new(0, 6)
+layout.SortOrder = Enum.SortOrder.LayoutOrder
+
+local pad = Instance.new("UIPadding", content)
+pad.PaddingTop = UDim.new(0, 2)
+pad.PaddingBottom = UDim.new(0, 6)
+pad.PaddingLeft = UDim.new(0, 2)
+pad.PaddingRight = UDim.new(0, 4)
+
+-- ═══════════════════════════════════════════════════════════════
+--  WIDGETS
+-- ═══════════════════════════════════════════════════════════════
+local function clearContent()
+    for _, c in ipairs(content:GetChildren()) do
+        if not c:IsA("UIListLayout") and not c:IsA("UIPadding") then
+            c:Destroy()
+        end
+    end
+end
+
+local function section(text)
+    local l = Instance.new("TextLabel")
+    l.Size = UDim2.new(1, 0, 0, 16)
+    l.BackgroundTransparency = 1
+    l.Font = Enum.Font.GothamBold
+    l.Text = text
+    l.TextColor3 = T().Accent
+    l.TextSize = 10
+    l.TextXAlignment = Enum.TextXAlignment.Left
+    l.Parent = content
+    return l
+end
+
+local function toggle(name, getter, setter)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, 0, 0, 32)
+    btn.BackgroundColor3 = T().Element
+    btn.BorderSizePixel = 0
+    btn.Text = ""
+    btn.Parent = content
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+
+    local lbl = Instance.new("TextLabel")
+    lbl.Size = UDim2.new(1, -70, 1, 0)
+    lbl.Position = UDim2.new(0, 10, 0, 0)
+    lbl.BackgroundTransparency = 1
+    lbl.Font = Enum.Font.Gotham
+    lbl.Text = name
+    lbl.TextColor3 = T().Text
+    lbl.TextSize = 12
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.Parent = btn
+
+    local track = Instance.new("Frame")
+    track.Size = UDim2.new(0, 36, 0, 18)
+    track.Position = UDim2.new(1, -46, 0.5, -9)
+    track.BackgroundColor3 = getter() and T().Accent or T().SubText
+    track.BorderSizePixel = 0
+    track.Parent = btn
+    Instance.new("UICorner", track).CornerRadius = UDim.new(1, 0)
+
+    local knob = Instance.new("Frame")
+    knob.Size = UDim2.new(0, 14, 0, 14)
+    knob.Position = getter() and UDim2.new(0, 19, 0.5, -7) or UDim2.new(0, 3, 0.5, -7)
+    knob.BackgroundColor3 = Color3.fromRGB(255,255,255)
+    knob.BorderSizePixel = 0
+    knob.Parent = track
+    Instance.new("UICorner", knob).CornerRadius = UDim.new(1, 0)
+
+    btn.MouseButton1Click:Connect(function()
+        local v = not getter()
+        setter(v)
+        track.BackgroundColor3 = v and T().Accent or T().SubText
+        knob.Position = v and UDim2.new(0, 19, 0.5, -7) or UDim2.new(0, 3, 0.5, -7)
+        saveConfig()
+    end)
+end
+
+local function slider(name, min, max, decimals, getter, setter)
+    local box = Instance.new("Frame")
+    box.Size = UDim2.new(1, 0, 0, 40)
+    box.BackgroundColor3 = T().Element
+    box.BorderSizePixel = 0
+    box.Parent = content
+    Instance.new("UICorner", box).CornerRadius = UDim.new(0, 6)
+
+    local lbl = Instance.new("TextLabel")
+    lbl.Size = UDim2.new(1, -20, 0, 16)
+    lbl.Position = UDim2.new(0, 10, 0, 3)
+    lbl.BackgroundTransparency = 1
+    lbl.Font = Enum.Font.Gotham
+    lbl.TextColor3 = T().Text
+    lbl.TextSize = 11
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.Text = string.format("%s   %."..decimals.."f", name, getter())
+    lbl.Parent = box
+
+    local barBg = Instance.new("Frame")
+    barBg.Size = UDim2.new(1, -20, 0, 8)
+    barBg.Position = UDim2.new(0, 10, 0, 24)
+    barBg.BackgroundColor3 = T().Bg
+    barBg.BorderSizePixel = 0
+    barBg.Parent = box
+    Instance.new("UICorner", barBg).CornerRadius = UDim.new(0, 4)
+
+    local fill = Instance.new("Frame")
+    local pct = (getter() - min) / (max - min)
+    fill.Size = UDim2.new(math.clamp(pct, 0, 1), 0, 1, 0)
+    fill.BackgroundColor3 = T().Accent
+    fill.BorderSizePixel = 0
+    fill.Parent = barBg
+    Instance.new("UICorner", fill).CornerRadius = UDim.new(0, 4)
+
+    local dragging = false
+    local function updateFromX(x)
+        local px = math.clamp((x - barBg.AbsolutePosition.X) / math.max(1, barBg.AbsoluteSize.X), 0, 1)
+        local v = min + px * (max - min)
+        v = tonumber(string.format("%."..decimals.."f", v))
+        setter(v)
+        fill.Size = UDim2.new(px, 0, 1, 0)
+        lbl.Text = string.format("%s   %."..decimals.."f", name, v)
+        saveConfig()
+    end
+
+    barBg.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            updateFromX(input.Position.X)
+        end
+    end)
+    barBg.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            updateFromX(input.Position.X)
+        end
+    end)
+end
+
+local function button(text, callback, color)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, 0, 0, 32)
+    btn.BackgroundColor3 = color or T().Element
+    btn.BorderSizePixel = 0
+    btn.Font = Enum.Font.GothamBold
+    btn.Text = text
+    btn.TextColor3 = T().Text
+    btn.TextSize = 12
+    btn.Parent = content
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+    btn.MouseButton1Click:Connect(callback)
+    return btn
+end
+
+local function input(placeholder, getter, setter, height)
+    local box = Instance.new("TextBox")
+    box.Size = UDim2.new(1, 0, 0, height or 32)
+    box.BackgroundColor3 = T().Element
+    box.BorderSizePixel = 0
+    box.Font = Enum.Font.Gotham
+    box.Text = getter() or ""
+    box.PlaceholderText = placeholder
+    box.TextColor3 = T().Text
+    box.PlaceholderColor3 = T().SubText
+    box.TextSize = 11
+    box.ClearTextOnFocus = false
+    box.TextXAlignment = Enum.TextXAlignment.Left
+    box.TextWrapped = true
+    box.MultiLine = height and height > 60
+    box.Parent = content
+    Instance.new("UICorner", box).CornerRadius = UDim.new(0, 6)
+    local p = Instance.new("UIPadding", box)
+    p.PaddingLeft = UDim.new(0, 8)
+    p.PaddingRight = UDim.new(0, 8)
+    p.PaddingTop = UDim.new(0, 6)
+    p.PaddingBottom = UDim.new(0, 6)
+    box:GetPropertyChangedSignal("Text"):Connect(function() setter(box.Text) end)
+    return box
+end
+
+-- ═══════════════════════════════════════════════════════════════
+--  ACTION BAR (bottom)
+-- ═══════════════════════════════════════════════════════════════
+local actionBar = Instance.new("Frame")
+actionBar.Size = UDim2.new(1, -16, 0, 100)
+actionBar.Position = UDim2.new(0, 8, 1, -108)
+actionBar.BackgroundColor3 = T().Element
+actionBar.BorderSizePixel = 0
+actionBar.Parent = win
+Instance.new("UICorner", actionBar).CornerRadius = UDim.new(0, 8)
+
+-- Progress bar
+local progressBg = Instance.new("Frame")
+progressBg.Size = UDim2.new(1, -20, 0, 4)
+progressBg.Position = UDim2.new(0, 10, 0, 8)
+progressBg.BackgroundColor3 = T().Bg
+progressBg.BorderSizePixel = 0
+progressBg.Parent = actionBar
+Instance.new("UICorner", progressBg).CornerRadius = UDim.new(0, 2)
+
+local progressFill = Instance.new("Frame")
+progressFill.Size = UDim2.new(0, 0, 1, 0)
+progressFill.BackgroundColor3 = T().Accent
+progressFill.BorderSizePixel = 0
+progressFill.Parent = progressBg
+Instance.new("UICorner", progressFill).CornerRadius = UDim.new(0, 2)
+
+-- Status row
+local statusLbl = Instance.new("TextLabel")
+statusLbl.Size = UDim2.new(1, -20, 0, 16)
+statusLbl.Position = UDim2.new(0, 10, 0, 16)
+statusLbl.BackgroundTransparency = 1
+statusLbl.Font = Enum.Font.Gotham
+statusLbl.Text = "Ready"
+statusLbl.TextColor3 = T().SubText
+statusLbl.TextSize = 10
+statusLbl.TextXAlignment = Enum.TextXAlignment.Left
+statusLbl.Parent = actionBar
+
+local timeLbl = Instance.new("TextLabel")
+timeLbl.Size = UDim2.new(0, 100, 0, 16)
+timeLbl.Position = UDim2.new(1, -110, 0, 16)
+timeLbl.BackgroundTransparency = 1
+timeLbl.Font = Enum.Font.Gotham
+timeLbl.Text = "0:00 / 0:00"
+timeLbl.TextColor3 = T().SubText
+timeLbl.TextSize = 10
+timeLbl.TextXAlignment = Enum.TextXAlignment.Right
+timeLbl.Parent = actionBar
+
+-- Buttons
+local playBtn = Instance.new("TextButton")
+playBtn.Size = UDim2.new(0.5, -12, 0, 38)
+playBtn.Position = UDim2.new(0, 10, 0, 40)
+playBtn.BackgroundColor3 = Color3.fromRGB(60, 160, 90)
+playBtn.BorderSizePixel = 0
+playBtn.Font = Enum.Font.GothamBold
+playBtn.Text = "▶  Play"
+playBtn.TextColor3 = Color3.fromRGB(255,255,255)
+playBtn.TextSize = 13
+playBtn.Parent = actionBar
+Instance.new("UICorner", playBtn).CornerRadius = UDim.new(0, 8)
+
+local stopBtn = Instance.new("TextButton")
+stopBtn.Size = UDim2.new(0.25, -12, 0, 38)
+stopBtn.Position = UDim2.new(0.5, 4, 0, 40)
+stopBtn.BackgroundColor3 = Color3.fromRGB(180, 60, 70)
+stopBtn.BorderSizePixel = 0
+stopBtn.Font = Enum.Font.GothamBold
+stopBtn.Text = "⏹"
+stopBtn.TextColor3 = Color3.fromRGB(255,255,255)
+stopBtn.TextSize = 16
+stopBtn.Parent = actionBar
+Instance.new("UICorner", stopBtn).CornerRadius = UDim.new(0, 8)
+
+local loopBtn = Instance.new("TextButton")
+loopBtn.Size = UDim2.new(0.25, -8, 0, 38)
+loopBtn.Position = UDim2.new(0.75, 0, 0, 40)
+loopBtn.BackgroundColor3 = CURRENT.Loop and T().Accent or T().Bg
+loopBtn.BorderSizePixel = 0
+loopBtn.Font = Enum.Font.GothamBold
+loopBtn.Text = "🔁"
+loopBtn.TextColor3 = T().Text
+loopBtn.TextSize = 16
+loopBtn.Parent = actionBar
+Instance.new("UICorner", loopBtn).CornerRadius = UDim.new(0, 8)
+
+loopBtn.MouseButton1Click:Connect(function()
+    CURRENT.Loop = not CURRENT.Loop
+    loopBtn.BackgroundColor3 = CURRENT.Loop and T().Accent or T().Bg
+    saveConfig()
+end)
+
+-- ═══════════════════════════════════════════════════════════════
+--  PLAYBACK FUNCTIONS
+-- ═══════════════════════════════════════════════════════════════
+local function updateSheetInfo()
+    if not content then return end
+    if #sheetText < 3 then
+        statusLbl.Text = "Paste a sheet in the SHEET tab"
+        return
+    end
+    local events = parseSheet(sheetText)
+    local notes, chords = 0, 0
+    for _, ev in ipairs(events) do
+        if #ev.keys > 0 then
+            if #ev.keys > 2 then chords = chords + 1 else notes = notes + 1 end
+        end
+    end
+    local dur = estimateDuration(events, tonumber(CURRENT.Speed) or 1)
+    statusLbl.Text = string.format("%d notes • %d chords • ~%s", notes, chords, formatTime(dur))
+end
+
+local function updateProgress()
+    local total = #currentEvents
+    if total == 0 then return end
+    progressFill.Size = UDim2.new(currentIndex / total, 0, 1, 0)
+    local elapsed = tick() - playStartTime
+    local remain = math.max(0, estimatedDuration - elapsed)
+    timeLbl.Text = formatTime(elapsed) .. " / " .. formatTime(estimatedDuration)
+end
+
+local function startPlay()
+    if isPlaying then stopFlag = true; task.wait(0.15) end
+    if #sheetText < 3 then
+        statusLbl.Text = "⚠ Sheet is empty"
+        return
+    end
+    local sheet = applyTranspose(sheetText, tonumber(CURRENT.Transpose) or 0)
+    currentEvents = parseSheet(sheet)
+    if #currentEvents == 0 then
+        statusLbl.Text = "⚠ No notes found"
+        return
+    end
+    estimatedDuration = estimateDuration(currentEvents, tonumber(CURRENT.Speed) or 1)
+    isPlaying, stopFlag = true, false
+    currentIndex = 0
+
+    if CURRENT.AutoHide and not IS_MOBILE then
+        content.Visible = false
+        autoHid = true
+    end
+
+    playThread = task.spawn(function()
+        for i = tonumber(CURRENT.Countdown) or 3, 1, -1 do
+            if stopFlag then break end
+            statusLbl.Text = "Starting in " .. i .. "..."
+            task.wait(1)
+        end
+        playStartTime = tick()
+        local speed = tonumber(CURRENT.Speed) or 1
+        local hold = tonumber(CURRENT.KeyHold) or 0.04
+        local arp = tonumber(CURRENT.ChordArpeggio) or 0
+        local human = tonumber(CURRENT.Humanize) or 0
+
+        while true do
+            if stopFlag then break end
+            for idx, ev in ipairs(currentEvents) do
+                if stopFlag then break end
+                currentIndex = idx
+                if #ev.keys > 0 then
+                    if arp > 0 and #ev.keys > 1 then
+                        for _, kc in ipairs(ev.keys) do
+                            pcall(function() VirtualInputManager:SendKeyEvent(true, kc, false, game) end)
+                            task.wait(arp / speed)
+                        end
+                    else
+                        pressKeys(ev.keys)
+                    end
+                    task.wait(math.max(0.005, hold / speed))
+                    releaseKeys(ev.keys)
+                end
+                local baseWait = (ev.wait or 0.02)
+                if human > 0 then baseWait = baseWait + (math.random() * human / 100) end
+                task.wait(math.max(0.005, baseWait / speed))
+                if idx % 5 == 0 then updateProgress() end
+            end
+            if not CURRENT.Loop then break end
+        end
+        isPlaying = false
+        stopFlag = false
+        currentIndex = 0
+        progressFill.Size = UDim2.new(0, 0, 1, 0)
+        timeLbl.Text = "0:00 / 0:00"
+        statusLbl.Text = "✅ Finished"
+        if autoHid then content.Visible = true; autoHid = false end
+    end)
+end
+
+local function stopPlay()
+    stopFlag = true
+    isPlaying = false
+    statusLbl.Text = "⏹ Stopped"
+    if autoHid then content.Visible = true; autoHid = false end
+end
+
+playBtn.MouseButton1Click:Connect(startPlay)
+stopBtn.MouseButton1Click:Connect(stopPlay)
+
+-- ═══════════════════════════════════════════════════════════════
+--  TABS
+-- ═══════════════════════════════════════════════════════════════
+local tabs = {}
+
+tabs.SHEET = function()
+    local ta = input("Paste sheet music here...", function() return sheetText end, function(v)
+        sheetText = v
+        CURRENT.LastSheet = v
+        saveConfig()
+        updateSheetInfo()
+    end, 220)
+
+    -- Speed presets row
+    local row = Instance.new("Frame")
+    row.Size = UDim2.new(1, 0, 0, 28)
+    row.BackgroundTransparency = 1
+    row.Parent = content
+
+    local presets = { 0.5, 0.75, 1.0, 1.25, 1.5, 2.0 }
+    for i, v in ipairs(presets) do
+        local b = Instance.new("TextButton")
+        b.Size = UDim2.new(1/6, -3, 1, 0)
+        b.Position = UDim2.new((i-1)/6, 1, 0, 0)
+        b.BackgroundColor3 = T().Element
+        b.BorderSizePixel = 0
+        b.Font = Enum.Font.GothamBold
+        b.Text = v .. "x"
+        b.TextColor3 = T().Text
+        b.TextSize = 10
+        b.Parent = row
+        Instance.new("UICorner", b).CornerRadius = UDim.new(0, 5)
+        b.MouseButton1Click:Connect(function()
+            CURRENT.Speed = v
+            saveConfig()
+            statusLbl.Text = "Speed: " .. v .. "x"
+            updateSheetInfo()
+        end)
+    end
+
+    slider("Speed", 0.25, 4, 2, function() return tonumber(CURRENT.Speed) or 1 end, function(v)
+        CURRENT.Speed = v
+        updateSheetInfo()
+    end)
+    slider("Key Hold", 0.01, 0.3, 3, function() return tonumber(CURRENT.KeyHold) or 0.04 end, function(v) CURRENT.KeyHold = v end)
+end
+
+tabs.OPTIONS = function()
+    toggle("Loop", function() return CURRENT.Loop end, function(v) CURRENT.Loop = v; loopBtn.BackgroundColor3 = v and T().Accent or T().Bg end)
+    toggle("Auto-Hide UI (PC)", function() return CURRENT.AutoHide end, function(v) CURRENT.AutoHide = v end)
+    toggle("Anti-AFK", function() return CURRENT.AntiAFK end, function(v) CURRENT.AntiAFK = v end)
+    slider("Countdown", 0, 10, 0, function() return tonumber(CURRENT.Countdown) or 3 end, function(v) CURRENT.Countdown = math.floor(v) end)
+    slider("Arpeggio", 0, 0.2, 3, function() return tonumber(CURRENT.ChordArpeggio) or 0 end, function(v) CURRENT.ChordArpeggio = v end)
+    slider("Humanize %", 0, 15, 0, function() return tonumber(CURRENT.Humanize) or 0 end, function(v) CURRENT.Humanize = math.floor(v) end)
+
+    section("TRANSPOSE")
+    local row = Instance.new("Frame")
+    row.Size = UDim2.new(1, 0, 0, 32)
+    row.BackgroundTransparency = 1
+    row.Parent = content
+
+    local minus = Instance.new("TextButton")
+    minus.Size = UDim2.new(0.3, -4, 1, 0)
+    minus.BackgroundColor3 = T().Element
+    minus.BorderSizePixel = 0
+    minus.Font = Enum.Font.GothamBold
+    minus.Text = "−1"
+    minus.TextColor3 = T().Text
+    minus.TextSize = 14
+    minus.Parent = row
+    Instance.new("UICorner", minus).CornerRadius = UDim.new(0, 6)
+
+    local mid = Instance.new("TextLabel")
+    mid.Size = UDim2.new(0.4, -8, 1, 0)
+    mid.Position = UDim2.new(0.3, 4, 0, 0)
+    mid.BackgroundColor3 = T().Element
+    mid.BorderSizePixel = 0
+    mid.Font = Enum.Font.GothamBold
+    mid.Text = tostring(CURRENT.Transpose or 0)
+    mid.TextColor3 = T().Accent
+    mid.TextSize = 14
+    mid.Parent = row
+    Instance.new("UICorner", mid).CornerRadius = UDim.new(0, 6)
+
+    local plus = Instance.new("TextButton")
+    plus.Size = UDim2.new(0.3, -4, 1, 0)
+    plus.Position = UDim2.new(0.7, 4, 0, 0)
+    plus.BackgroundColor3 = T().Element
+    plus.BorderSizePixel = 0
+    plus.Font = Enum.Font.GothamBold
+    plus.Text = "+1"
+    plus.TextColor3 = T().Text
+    plus.TextSize = 14
+    plus.Parent = row
+    Instance.new("UICorner", plus).CornerRadius = UDim.new(0, 6)
+
+    minus.MouseButton1Click:Connect(function()
+        CURRENT.Transpose = math.max(-2, (CURRENT.Transpose or 0) - 1)
+        mid.Text = tostring(CURRENT.Transpose)
+        saveConfig()
+    end)
+    plus.MouseButton1Click:Connect(function()
+        CURRENT.Transpose = math.min(2, (CURRENT.Transpose or 0) + 1)
+        mid.Text = tostring(CURRENT.Transpose)
+        saveConfig()
+    end)
+end
+
+tabs.SAVE = function()
+    if not HAS_FILE_IO then
+        local msg = Instance.new("TextLabel")
+        msg.Size = UDim2.new(1, 0, 0, 60)
+        msg.BackgroundColor3 = T().Element
+        msg.BorderSizePixel = 0
+        msg.Font = Enum.Font.Gotham
+        msg.Text = "File I/O not supported by your executor. Save/load disabled."
+        msg.TextColor3 = T().SubText
+        msg.TextSize = 11
+        msg.TextWrapped = true
+        msg.Parent = content
+        Instance.new("UICorner", msg).CornerRadius = UDim.new(0, 6)
+        return
+    end
+
+    section("SAVE / LOAD")
+    local name = ""
+    input("Song name...", function() return name end, function(v) name = v end, 32)
+
+    button("💾 Save Current Sheet", function()
+        if name == "" then statusLbl.Text = "⚠ Enter a name"; return end
+        if #sheetText < 3 then statusLbl.Text = "⚠ Sheet empty"; return end
+        pcall(function()
+            writefile(SHEET_FOLDER .. "/" .. name .. ".txt", sheetText)
+            statusLbl.Text = "✅ Saved: " .. name
+        end)
+    end)
+
+    button("📂 Load Sheet", function()
+        if name == "" then statusLbl.Text = "⚠ Enter a name"; return end
+        pcall(function()
+            local c = readfile(SHEET_FOLDER .. "/" .. name .. ".txt")
+            if c then
+                sheetText = c
+                CURRENT.LastSheet = c
+                saveConfig()
+                clearContent()
+                tabs.SHEET()
+                statusLbl.Text = "✅ Loaded: " .. name
+            else
+                statusLbl.Text = "⚠ Not found"
+            end
+        end)
+    end)
+
+    button("🗑 Delete", function()
+        if name == "" then return end
+        pcall(function()
+            delfile(SHEET_FOLDER .. "/" .. name .. ".txt")
+            statusLbl.Text = "✅ Deleted"
+        end)
+    end)
+
+    -- List saved
+    section("SAVED SHEETS")
+    local listLbl = Instance.new("TextLabel")
+    listLbl.Size = UDim2.new(1, 0, 0, 60)
+    listLbl.BackgroundColor3 = T().Element
+    listLbl.BorderSizePixel = 0
+    listLbl.Font = Enum.Font.Gotham
+    listLbl.TextColor3 = T().SubText
+    listLbl.TextSize = 10
+    listLbl.TextWrapped = true
+    listLbl.TextYAlignment = Enum.TextYAlignment.Top
+    listLbl.Parent = content
+    Instance.new("UICorner", listLbl).CornerRadius = UDim.new(0, 6)
+
+    pcall(function()
+        local names = {}
+        if typeof(listfiles) == "function" then
+            local ok, listing = pcall(listfiles, SHEET_FOLDER)
+            if ok and listing then
+                for _, f in ipairs(listing) do
+                    if f:lower():match("%.txt$") then
+                        local n = f:match("([^/\\]+)$"):gsub("%.txt$", "")
+                        if n ~= ".keep" then table.insert(names, n) end
+                    end
+                end
+            end
+        end
+        listLbl.Text = #names > 0 and table.concat(names, "\n") or "No saved sheets yet."
+    end)
+
+    section("IMPORT")
+    local url = ""
+    input("Raw URL...", function() return url end, function(v) url = v end, 32)
+    button("🌐 Import from URL", function()
+        if url == "" then statusLbl.Text = "⚠ Paste URL"; return end
+        local ok, res = pcall(function() return game:HttpGet(url) end)
+        if ok and res and #res > 0 then
+            sheetText = res
+            CURRENT.LastSheet = res
+            saveConfig()
+            clearContent()
+            tabs.SHEET()
+            statusLbl.Text = "✅ Imported"
+        else
+            statusLbl.Text = "⚠ Import failed"
+        end
+    end)
+end
+
+tabs.INFO = function()
+    section("THEME")
+    local themes = { "Purple", "Red", "Blue", "Green", "Gold", "Mono" }
+    local row = Instance.new("Frame")
+    row.Size = UDim2.new(1, 0, 0, 32)
+    row.BackgroundTransparency = 1
+    row.Parent = content
+
+    for i, name in ipairs(themes) do
+        local b = Instance.new("TextButton")
+        b.Size = UDim2.new(1/6, -3, 1, 0)
+        b.Position = UDim2.new((i-1)/6, 1, 0, 0)
+        b.BackgroundColor3 = THEMES[name].Accent
+        b.BorderSizePixel = 0
+        b.Text = ""
+        b.Parent = row
+        Instance.new("UICorner", b).CornerRadius = UDim.new(0, 6)
+        b.MouseButton1Click:Connect(function()
+            CURRENT.Theme = name
+            saveConfig()
+            -- quick theme swap
+            win.BackgroundColor3 = T().Bg
+            stroke.Color = T().Accent
+            titleLbl.TextColor3 = T().Text
+            clearContent()
+            tabs.INFO()
+        end)
+    end
+
+    slider("UI Scale", 0.7, 1.5, 2, function() return tonumber(CURRENT.UIScale) or 1 end, function(v)
+        CURRENT.UIScale = v
+        scale.Scale = v
+    end)
+
+    section("HOTKEYS")
+    local info = Instance.new("TextLabel")
+    info.Size = UDim2.new(1, 0, 0, 60)
+    info.BackgroundColor3 = T().Element
+    info.BorderSizePixel = 0
+    info.Font = Enum.Font.Gotham
+    info.Text = "RightShift = Stop\nRightCtrl = Toggle UI\n\nType your sheet in the SHEET tab, then press Play."
+    info.TextColor3 = T().SubText
+    info.TextSize = 11
+    info.TextWrapped = true
+    info.TextYAlignment = Enum.TextYAlignment.Top
+    info.Parent = content
+    Instance.new("UICorner", info).CornerRadius = UDim.new(0, 6)
+
+    button("Unload Script", function()
+        if getgenv().InvalidX_Piano_Unload then getgenv().InvalidX_Piano_Unload() end
+    end, Color3.fromRGB(140, 50, 60))
+end
+
+-- Tab buttons
+for i, name in ipairs(tabNames) do
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(0.25, -2, 1, 0)
+    b.Position = UDim2.new((i-1) * 0.25, 1, 0, 0)
+    b.BackgroundColor3 = T().Element
+    b.BorderSizePixel = 0
+    b.Font = Enum.Font.GothamBold
+    b.Text = name
+    b.TextColor3 = T().SubText
+    b.TextSize = 10
+    b.Parent = tabRow
+    Instance.new("UICorner", b).CornerRadius = UDim.new(0, 5)
+    tabBtns[name] = b
+
+    b.MouseButton1Click:Connect(function()
+        for tn, btn in pairs(tabBtns) do
+            btn.BackgroundColor3 = tn == name and T().Accent or T().Element
+            btn.TextColor3 = tn == name and Color3.fromRGB(255,255,255) or T().SubText
+        end
+        currentTabName = name
+        clearContent()
+        tabs[name]()
+    end)
+end
+
+-- ═══════════════════════════════════════════════════════════════
+--  DRAG
+-- ═══════════════════════════════════════════════════════════════
+do
+    local dragging, dragStart, startPos = false, nil, nil
+    titleRow.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = input.Position
+            startPos = win.Position
+        end
+    end)
+    titleRow.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            local d = input.Position - dragStart
+            win.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y)
+        end
+    end)
+end
+
+-- ═══════════════════════════════════════════════════════════════
+--  MINIMIZE / CLOSE / KEYBINDS
+-- ═══════════════════════════════════════════════════════════════
+local minimized = false
+minBtn.MouseButton1Click:Connect(function()
+    minimized = not minimized
+    win.Size = minimized and UDim2.new(0, W, 0, 34) or UDim2.new(0, W, 0, H)
+    tabRow.Visible = not minimized
+    content.Visible = not minimized
+    actionBar.Visible = not minimized
+    minBtn.Text = minimized and "+" or "—"
+end)
+
+closeBtn.MouseButton1Click:Connect(function()
+    ui.Enabled = false
+end)
+
+UserInputService.InputBegan:Connect(function(input, gpe)
+    if gpe then return end
+    if input.KeyCode == Enum.KeyCode.RightShift then
+        if isPlaying then stopPlay() end
+    elseif input.KeyCode == Enum.KeyCode.RightControl then
+        ui.Enabled = not ui.Enabled
+    end
+end)
+
+-- ═══════════════════════════════════════════════════════════════
+--  ANTI-AFK
+-- ═══════════════════════════════════════════════════════════════
+task.spawn(function()
+    while getgenv().INVALIDX_PIANO_LOADED do
+        task.wait(60)
+        if CURRENT.AntiAFK then
+            pcall(function()
+                local vu = game:GetService("VirtualUser")
+                vu:CaptureController()
+                vu:ClickButton2(Vector2.new())
+            end)
+        end
+    end
+end)
+
+-- ═══════════════════════════════════════════════════════════════
+--  UNLOAD
+-- ═══════════════════════════════════════════════════════════════
+getgenv().InvalidX_Piano_Unload = function()
+    stopFlag = true
+    isPlaying = false
+    if playThread then pcall(function() task.cancel(playThread) end) end
+    if ui then ui:Destroy() end
+    getgenv().INVALIDX_PIANO_LOADED = nil
+end
+
+-- ═══════════════════════════════════════════════════════════════
+--  INIT
+-- ═══════════════════════════════════════════════════════════════
+-- Default tab
+for tn, btn in pairs(tabBtns) do
+    btn.BackgroundColor3 = tn == "SHEET" and T().Accent or T().Element
+    btn.TextColor3 = tn == "SHEET" and Color3.fromRGB(255,255,255) or T().SubText
+end
+clearContent()
+tabs.SHEET()
+updateSheetInfo()
+
+print("[InvalidX Piano] v3.1 loaded — " .. (IS_MOBILE and "Mobile" or "PC"))
