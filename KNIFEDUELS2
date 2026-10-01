@@ -1,0 +1,1673 @@
+--========================================================
+-- Knife Duels Script v5.1 — MOBILE + PC ULTIMATE
+-- PART 1/3: SERVICES, CONFIG & AUTO-SAVE
+--========================================================
+
+if _G.KNIFE_DUELS_SCRIPT_LOADED then
+    return
+end
+_G.KNIFE_DUELS_SCRIPT_LOADED = true
+
+local Players          = game:GetService("Players")
+local RunService       = game:GetService("RunService")
+local Workspace        = game:GetService("Workspace")
+local CoreGui          = game:GetService("CoreGui")
+local UserInputService = game:GetService("UserInputService")
+local TweenService     = game:GetService("TweenService")
+local HttpService      = game:GetService("HttpService")
+
+local LocalPlayer = Players.LocalPlayer
+local Camera      = Workspace.CurrentCamera
+local Mouse       = LocalPlayer:GetMouse()
+
+local IS_MOBILE = UserInputService.TouchEnabled and not UserInputService.MouseEnabled
+local VIEWPORT  = Workspace.CurrentCamera.ViewportSize
+
+local CONFIG_FILE = "InvalidX_Config.json"
+
+local MASTER_DEFAULTS = {
+    ESP_Enabled       = true,
+    ESP_Mode          = "Skeleton",
+    LineThickness     = 1.8,
+    RainbowSpeed      = 1.2,
+    MaxDistance       = 2000,
+    ESP_ColorMode     = "Rainbow",
+    ESP_SolidColor    = {r = 0, g = 170, b = 255},
+    ESP_ShowName      = true,
+    ESP_ShowDistance  = true,
+
+    AIM_Enabled       = false,
+    AIM_Pull          = 0.25,
+    AIM_Smoothness    = 0.25,
+    AIM_MaxCorrection = 15,
+    AIM_FOV           = 50,
+    AIM_MaxDistance   = 700,
+    AIM_Predict       = true,
+    AIM_IgnoreFriends = true,
+    AIM_AimPart       = "UpperTorso",
+
+    Trigger_Enabled   = false,
+    Trigger_Delay     = 0.12,
+
+    AlertHighLevel        = false,
+    AlertLevelThreshold   = 150,
+    AlertHighStreak       = false,
+    AlertStreakThreshold  = 10,
+    AlertRushers          = false,
+    AlertRusherDistance   = 40,
+    AlertAimLock          = false,
+    AlertAimLockAngle     = 12,
+    AlertBackstab         = false,
+    AlertBackstabDistance = 25,
+
+    ThirdPerson_Enabled   = false,
+    SpeedHack_Enabled     = false,
+    SpeedHack_Value       = 25,
+
+    Theme             = "NeonRed",
+    AccentColor       = {r = 255, g = 40, b = 80},
+    BackgroundOpacity = 0.85,
+
+    KB_AimToggle      = Enum.KeyCode.Q.Value,
+    KB_TriggerToggle  = Enum.KeyCode.E.Value,
+    KB_ESPToggle      = Enum.KeyCode.RightShift.Value,
+    KB_ThirdPerson    = Enum.KeyCode.T.Value,
+    KB_SpeedHack      = Enum.KeyCode.G.Value,
+    KB_UIToggle       = Enum.KeyCode.RightControl.Value,
+    KB_Panic          = Enum.KeyCode.P.Value
+}
+
+local CURRENT = {}
+
+local function LoadOrCreateConfig()
+    local loaded = nil
+    if typeof(isfile) == "function" and isfile(CONFIG_FILE) then
+        local ok, data = pcall(readfile, CONFIG_FILE)
+        if ok and #data > 0 then
+            local ok2, dec = pcall(function() return HttpService:JSONDecode(data) end)
+            if ok2 and typeof(dec) == "table" then
+                loaded = dec
+            end
+        end
+    end
+    for k, v in pairs(MASTER_DEFAULTS) do
+        if loaded and loaded[k] ~= nil then
+            CURRENT[k] = loaded[k]
+        else
+            CURRENT[k] = v
+        end
+    end
+    local ok, data = pcall(function() return HttpService:JSONEncode(CURRENT) end)
+    if ok and typeof(writefile) == "function" then
+        pcall(writefile, CONFIG_FILE, data)
+    end
+end
+
+local function SaveSettings()
+    if typeof(writefile) == "function" then
+        local ok, data = pcall(function() return HttpService:JSONEncode(CURRENT) end)
+        if ok then
+            pcall(writefile, CONFIG_FILE, data)
+            return true
+        end
+    end
+    return false
+end
+
+LoadOrCreateConfig()
+
+local ESP_Enabled      = CURRENT.ESP_Enabled
+local AIM_Enabled      = CURRENT.AIM_Enabled
+local Trigger_Enabled  = CURRENT.Trigger_Enabled
+local ESP_ShowName     = CURRENT.ESP_ShowName
+local ESP_ShowDistance = CURRENT.ESP_ShowDistance
+
+local AIM_CONFIG = {
+    Pull          = CURRENT.AIM_Pull,
+    Smoothness    = CURRENT.AIM_Smoothness,
+    MaxCorrection = CURRENT.AIM_MaxCorrection,
+    FOV           = CURRENT.AIM_FOV,
+    MaxDistance   = CURRENT.AIM_MaxDistance,
+    Predict       = CURRENT.AIM_Predict,
+    IgnoreFriends = CURRENT.AIM_IgnoreFriends,
+    AimPart       = CURRENT.AIM_AimPart
+}
+
+local function KeyCodeFromValue(v)
+    for _, kc in pairs(Enum.KeyCode:GetEnumItems()) do
+        if kc.Value == v then return kc end
+    end
+    return Enum.KeyCode.Unknown
+end
+
+local KB_AIM  = KeyCodeFromValue(CURRENT.KB_AimToggle)
+local KB_TRIG = KeyCodeFromValue(CURRENT.KB_TriggerToggle)
+local KB_ESP  = KeyCodeFromValue(CURRENT.KB_ESPToggle)
+local KB_TP   = KeyCodeFromValue(CURRENT.KB_ThirdPerson)
+local KB_SH   = KeyCodeFromValue(CURRENT.KB_SpeedHack)
+local KB_UI   = KeyCodeFromValue(CURRENT.KB_UIToggle)
+local KB_PANIC= KeyCodeFromValue(CURRENT.KB_Panic)
+
+_G.INVALIDX = {
+    CURRENT          = CURRENT,
+    AIM_CONFIG       = AIM_CONFIG,
+    ESP_Enabled      = ESP_Enabled,
+    AIM_Enabled      = AIM_Enabled,
+    Trigger_Enabled  = Trigger_Enabled,
+    ESP_ShowName     = ESP_ShowName,
+    ESP_ShowDistance = ESP_ShowDistance,
+    KB_AIM           = KB_AIM,
+    KB_TRIG          = KB_TRIG,
+    KB_ESP           = KB_ESP,
+    KB_TP            = KB_TP,
+    KB_SH            = KB_SH,
+    KB_UI            = KB_UI,
+    KB_PANIC         = KB_PANIC,
+    SaveSettings     = SaveSettings,
+    IsTeammate       = nil,
+    SetupPlayerESP   = nil,
+    GetAimTarget     = nil,
+    ShowNotification = nil,
+    CheckPlayerStats = nil,
+    ThreatState      = {}
+}
+
+--========================================================
+-- PART 2/3: NOTIFICATIONS, ESP, AIM & ALERTS
+--========================================================
+
+local IX              = _G.INVALIDX
+local CURRENT         = IX.CURRENT
+local AIM_CONFIG      = IX.AIM_CONFIG
+local KB_AIM          = IX.KB_AIM
+local KB_TRIG         = IX.KB_TRIG
+local KB_ESP          = IX.KB_ESP
+local SaveSettings    = IX.SaveSettings
+
+local Players         = game:GetService("Players")
+local Workspace       = game:GetService("Workspace")
+local CoreGui         = game:GetService("CoreGui")
+local TweenService    = game:GetService("TweenService")
+
+local LocalPlayer     = Players.LocalPlayer
+local Camera          = Workspace.CurrentCamera
+
+local function ShowNotification(title, message, duration)
+    duration = duration or 3
+    local gui = Instance.new("ScreenGui")
+    gui.Name = "InvalidX_Notification"
+    gui.Parent = CoreGui
+    gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(0, 300, 0, 85)
+    frame.Position = UDim2.new(1, 20, 0, -120)
+    frame.BackgroundColor3 = Color3.fromRGB(10, 10, 18)
+    frame.BackgroundTransparency = 0.15
+    frame.BorderSizePixel = 0
+    frame.Parent = gui
+    Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 14)
+
+    local stroke = Instance.new("UIStroke", frame)
+    stroke.Thickness = 3
+    stroke.Color = Color3.fromRGB(CURRENT.AccentColor.r, CURRENT.AccentColor.g, CURRENT.AccentColor.b)
+
+    local glow = Instance.new("UIStroke", frame)
+    glow.Thickness = 8
+    glow.Color = stroke.Color
+    glow.Transparency = 0.9
+
+    local titleLabel = Instance.new("TextLabel")
+    titleLabel.Size = UDim2.new(1, -20, 0, 28)
+    titleLabel.Position = UDim2.new(0, 10, 0, 8)
+    titleLabel.BackgroundTransparency = 1
+    titleLabel.Font = Enum.Font.GothamBold
+    titleLabel.Text = "✨ "..title
+    titleLabel.TextColor3 = Color3.fromRGB(255,255,255)
+    titleLabel.TextSize = 17
+    titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+    titleLabel.Parent = frame
+
+    local msgLabel = Instance.new("TextLabel")
+    msgLabel.Size = UDim2.new(1, -20, 0, 36)
+    msgLabel.Position = UDim2.new(0, 10, 0, 40)
+    msgLabel.BackgroundTransparency = 1
+    msgLabel.Font = Enum.Font.Gotham
+    msgLabel.Text = message
+    msgLabel.TextColor3 = Color3.fromRGB(210,210,230)
+    msgLabel.TextSize = 13
+    msgLabel.TextXAlignment = Enum.TextXAlignment.Left
+    msgLabel.TextWrapped = true
+    msgLabel.Parent = frame
+
+    frame.BackgroundTransparency = 1
+    titleLabel.TextTransparency = 1
+    msgLabel.TextTransparency = 1
+    stroke.Transparency = 1
+    glow.Transparency = 1
+
+    TweenService:Create(frame, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+        BackgroundTransparency = 0.15,
+        Position = UDim2.new(1, -320, 0, 25)
+    }):Play()
+    TweenService:Create(titleLabel, TweenInfo.new(0.3), {TextTransparency = 0}):Play()
+    TweenService:Create(msgLabel, TweenInfo.new(0.3), {TextTransparency = 0}):Play()
+    TweenService:Create(stroke, TweenInfo.new(0.3), {Transparency = 0}):Play()
+    TweenService:Create(glow, TweenInfo.new(0.3), {Transparency = 0.92}):Play()
+
+    task.wait(duration)
+
+    TweenService:Create(frame, TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+        BackgroundTransparency = 1,
+        Position = UDim2.new(1, 20, 0, -120)
+    }):Play()
+    TweenService:Create(titleLabel, TweenInfo.new(0.25), {TextTransparency = 1}):Play()
+    TweenService:Create(msgLabel, TweenInfo.new(0.25), {TextTransparency = 1}):Play()
+    TweenService:Create(stroke, TweenInfo.new(0.25), {Transparency = 1}):Play()
+    TweenService:Create(glow, TweenInfo.new(0.25), {Transparency = 1}):Play()
+    task.wait(0.4)
+    gui:Destroy()
+end
+
+IX.ShowNotification = ShowNotification
+
+task.delay(1.5, function()
+    ShowNotification("Knife Duels v5.1 Loaded",
+        ("Aim: %s • Trigger: %s • ESP: %s"):format(
+            IX.AIM_Enabled and "ON" or "OFF",
+            IX.Trigger_Enabled and "ON" or "OFF",
+            IX.ESP_Enabled and "ON" or "OFF"),
+        5)
+end)
+
+local AlertedPlayers = {}
+
+local function CheckPlayerStats(ply)
+    if ply == LocalPlayer then return end
+    if AlertedPlayers[ply.UserId] then return end
+    task.wait(1.5)
+    local leaderstats = ply:FindFirstChild("leaderstats")
+    if not leaderstats then return end
+    local Level     = leaderstats:FindFirstChild("Level")
+    local Winstreak = leaderstats:FindFirstChild("Winstreak")
+    local levelVal  = Level and Level.Value or 0
+    local streakVal = Winstreak and Winstreak.Value or 0
+    local levelHit  = CURRENT.AlertHighLevel  and levelVal  >= CURRENT.AlertLevelThreshold
+    local streakHit = CURRENT.AlertHighStreak and streakVal >= CURRENT.AlertStreakThreshold
+    if levelHit or streakHit then
+        AlertedPlayers[ply.UserId] = true
+        local msg = {}
+        if levelHit  then table.insert(msg, "Lv."..levelVal) end
+        if streakHit then table.insert(msg, "Streak "..streakVal) end
+        ShowNotification("⚠️ HIGH THREAT: "..ply.Name, table.concat(msg, " | "), 5)
+    end
+end
+
+IX.CheckPlayerStats = CheckPlayerStats
+
+local function RGBToColor3(c)
+    return Color3.fromRGB(math.clamp(c.r,0,255), math.clamp(c.g,0,255), math.clamp(c.b,0,255))
+end
+
+local function GetESPColor(isTeam)
+    if isTeam then return Color3.fromRGB(80, 180, 255) end
+    if CURRENT.ESP_ColorMode == "Rainbow" then
+        return Color3.fromHSV((os.clock() * CURRENT.RainbowSpeed) % 1, 1, 1)
+    else
+        return RGBToColor3(CURRENT.ESP_SolidColor)
+    end
+end
+
+local ESP_Container = Instance.new("Folder")
+ESP_Container.Name = "InvalidX_ESP"
+ESP_Container.Parent = CoreGui
+
+local function CreateLine()
+    local l = Drawing.new("Line")
+    l.Thickness = CURRENT.LineThickness
+    l.Transparency = 1
+    l.Visible = false
+    return l
+end
+
+local function CreateText()
+    local t = Drawing.new("Text")
+    t.Size = 14
+    t.Center = true
+    t.Outline = true
+    t.Visible = false
+    t.Color = Color3.fromRGB(255,255,255)
+    return t
+end
+
+local function CreateBox()
+    local b = Drawing.new("Square")
+    b.Thickness = 1.5
+    b.Filled = false
+    b.Transparency = 1
+    b.Visible = false
+    return b
+end
+
+local function GetSkeletonJoints(char)
+    local joints = {}
+    local isR15 = char:FindFirstChild("UpperTorso")
+    local bones = isR15 and {
+        {"Head","UpperTorso"},{"UpperTorso","LowerTorso"},
+        {"UpperTorso","RightUpperArm"},{"RightUpperArm","RightLowerArm"},{"RightLowerArm","RightHand"},
+        {"UpperTorso","LeftUpperArm"},{"LeftUpperArm","LeftLowerArm"},{"LeftLowerArm","LeftHand"},
+        {"LowerTorso","RightUpperLeg"},{"RightUpperLeg","RightLowerLeg"},{"RightLowerLeg","RightFoot"},
+        {"LowerTorso","LeftUpperLeg"},{"LeftUpperLeg","LeftLowerLeg"},{"LeftLowerLeg","LeftFoot"}
+    } or {
+        {"Head","Torso"},{"Torso","Right Arm"},{"Torso","Left Arm"},
+        {"Torso","Right Leg"},{"Torso","Left Leg"},
+        {"Right Arm","Right Hand"},{"Left Arm","Left Hand"},
+        {"Right Leg","Right Foot"},{"Left Leg","Left Foot"}
+    }
+    for _, pair in ipairs(bones) do
+        local a = char:FindFirstChild(pair[1], true)
+        local b = char:FindFirstChild(pair[2], true)
+        if a and b and a:IsA("BasePart") and b:IsA("BasePart") then
+            table.insert(joints, {From = a, To = b})
+        end
+    end
+    return joints
+end
+
+local PlayerData  = {}
+local ThreatState = IX.ThreatState
+
+local function IsTeammate(p)
+    if LocalPlayer.Team and p.Team then return LocalPlayer.Team == p.Team end
+    return false
+end
+IX.IsTeammate = IsTeammate
+
+local function CleanupPlayerData(data)
+    if not data then return end
+    for _, l in ipairs(data.Lines) do pcall(function() l:Remove() end) end
+    if data.Tracer then pcall(function() data.Tracer:Remove() end) end
+    if data.Info   then pcall(function() data.Info:Remove() end)   end
+    if data.Box    then pcall(function() data.Box:Remove() end)    end
+    for _, c in ipairs(data.Conns) do pcall(function() c:Disconnect() end) end
+end
+
+local function SetupPlayerESP(ply)
+    if ply == LocalPlayer then return end
+    if PlayerData[ply] then CleanupPlayerData(PlayerData[ply]) end
+    task.spawn(CheckPlayerStats, ply)
+    ThreatState[ply] = ThreatState[ply] or {lastRusherAlert = 0, lastAimLockAlert = 0, lastBackstabAlert = 0}
+    local data = {Lines = {}, Tracer = nil, Info = nil, Box = nil, Char = nil, Joints = {}, Conns = {}}
+    local function LoadChar(c)
+        data.Char = c
+        for _, l in ipairs(data.Lines) do pcall(function() l:Remove() end) end
+        if data.Tracer then pcall(function() data.Tracer:Remove() end) end
+        if data.Info   then pcall(function() data.Info:Remove() end)   end
+        if data.Box    then pcall(function() data.Box:Remove() end)    end
+        data.Lines = {}
+        data.Joints = GetSkeletonJoints(c)
+        for _ = 1, #data.Joints do table.insert(data.Lines, CreateLine()) end
+        data.Tracer = CreateLine()
+        data.Info = CreateText()
+        data.Box = CreateBox()
+    end
+    if ply.Character then LoadChar(ply.Character) end
+    table.insert(data.Conns, ply.CharacterAdded:Connect(function(c) task.wait(0.1); LoadChar(c) end))
+    table.insert(data.Conns, ply.CharacterRemoving:Connect(function()
+        data.Char = nil; data.Joints = {}
+        for _, l in ipairs(data.Lines) do l.Visible = false end
+        if data.Tracer then data.Tracer.Visible = false end
+        if data.Info then data.Info.Visible = false end
+        if data.Box then data.Box.Visible = false end
+    end))
+    PlayerData[ply] = data
+end
+IX.SetupPlayerESP = SetupPlayerESP
+
+local function RemovePlayerESP(ply)
+    local d = PlayerData[ply]
+    if not d then return end
+    CleanupPlayerData(d)
+    PlayerData[ply] = nil
+    AlertedPlayers[ply.UserId] = nil
+    ThreatState[ply] = nil
+end
+
+for _, p in ipairs(Players:GetPlayers()) do task.spawn(SetupPlayerESP, p) end
+Players.PlayerAdded:Connect(function(p) task.wait(0.3); SetupPlayerESP(p) end)
+Players.PlayerRemoving:Connect(RemovePlayerESP)
+LocalPlayer:GetPropertyChangedSignal("Team"):Connect(function()
+    for ply in pairs(PlayerData) do SetupPlayerESP(ply) end
+end)
+
+local function GetAimTarget()
+    local Best, BestDist = nil, AIM_CONFIG.MaxCorrection * 1.5
+    local CX = Camera.ViewportSize.X / 2
+    local CY = Camera.ViewportSize.Y / 2
+    for _, P in ipairs(Players:GetPlayers()) do
+        if P == LocalPlayer then continue end
+        if IsTeammate(P) then continue end
+        if AIM_CONFIG.IgnoreFriends and P:IsFriendsWith(LocalPlayer.UserId) then continue end
+        if not P.Character then continue end
+        local C = P.Character
+        local H = C:FindFirstChild("Humanoid")
+        if not H or H.Health <= 0 then continue end
+        local PN = AIM_CONFIG.AimPart
+        PN = C:FindFirstChild("UpperTorso") and (PN == "Torso" and "UpperTorso" or PN) or (PN == "UpperTorso" and "Torso" or PN)
+        local PT = C:FindFirstChild(PN) or C:FindFirstChild("Head")
+        if not PT then continue end
+        local Pos, OnS = Camera:WorldToViewportPoint(PT.Position)
+        if not OnS then continue end
+        local Dist = (Camera.CFrame.Position - PT.Position).Magnitude
+        if Dist > AIM_CONFIG.MaxDistance then continue end
+        local PX = math.sqrt((Pos.X - CX)^2 + (Pos.Y - CY)^2)
+        local Ang = math.deg(math.atan(PX / math.max(Dist, 1)))
+        if Ang > AIM_CONFIG.FOV then continue end
+        if PX < BestDist then
+            BestDist = PX
+            Best = {Pos = PT.Position, HRP = C:FindFirstChild("HumanoidRootPart")}
+        end
+    end
+    return Best
+end
+
+IX.GetAimTarget = GetAimTarget
+IX.PlayerData   = PlayerData
+IX.GetESPColor  = GetESPColor
+
+--========================================================
+-- PART 3/3: UI + KEYBINDS + FULL MAIN LOOP
+--========================================================
+
+local IX              = _G.INVALIDX
+local CURRENT         = IX.CURRENT
+local AIM_CONFIG      = IX.AIM_CONFIG
+local KB_AIM          = IX.KB_AIM
+local KB_TRIG         = IX.KB_TRIG
+local KB_ESP          = IX.KB_ESP
+local KB_TP           = IX.KB_TP
+local KB_SH           = IX.KB_SH
+local KB_UI           = IX.KB_UI
+local KB_PANIC        = IX.KB_PANIC
+local SaveSettings    = IX.SaveSettings
+local ShowNotification= IX.ShowNotification
+local SetupPlayerESP  = IX.SetupPlayerESP
+local IsTeammate      = IX.IsTeammate
+local GetAimTarget    = IX.GetAimTarget
+local PlayerData      = IX.PlayerData
+local GetESPColor     = IX.GetESPColor
+local ThreatState     = IX.ThreatState
+
+local ESP_Enabled      = IX.ESP_Enabled
+local AIM_Enabled      = IX.AIM_Enabled
+local Trigger_Enabled  = IX.Trigger_Enabled
+local ESP_ShowName     = IX.ESP_ShowName
+local ESP_ShowDistance = IX.ESP_ShowDistance
+
+local Players          = game:GetService("Players")
+local Workspace        = game:GetService("Workspace")
+local CoreGui          = game:GetService("CoreGui")
+local TweenService     = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+
+local LocalPlayer      = Players.LocalPlayer
+local Camera           = Workspace.CurrentCamera
+local Mouse            = LocalPlayer:GetMouse()
+
+-- Mobile detection
+local IS_MOBILE = UserInputService.TouchEnabled and not UserInputService.MouseEnabled
+local VIEWPORT  = Workspace.CurrentCamera.ViewportSize
+
+-- Themes
+local THEMES = {
+    NeonRed = { Bg = Color3.fromRGB(10,8,16), Accent = Color3.fromRGB(255,40,80), Text = Color3.fromRGB(255,255,255), SubText = Color3.fromRGB(190,190,210), Element = Color3.fromRGB(22,18,32), ElementHover = Color3.fromRGB(35,28,50), StatusBg = Color3.fromRGB(18,12,28) },
+    NeonPurple = { Bg = Color3.fromRGB(14,8,24), Accent = Color3.fromRGB(180,80,255), Text = Color3.fromRGB(255,255,255), SubText = Color3.fromRGB(200,180,230), Element = Color3.fromRGB(28,16,45), ElementHover = Color3.fromRGB(45,26,70), StatusBg = Color3.fromRGB(22,12,36) },
+    NeonAqua = { Bg = Color3.fromRGB(8,14,18), Accent = Color3.fromRGB(60,200,255), Text = Color3.fromRGB(240,255,255), SubText = Color3.fromRGB(160,210,230), Element = Color3.fromRGB(14,28,36), ElementHover = Color3.fromRGB(24,48,62), StatusBg = Color3.fromRGB(10,22,30) },
+    NeonLime = { Bg = Color3.fromRGB(8,16,10), Accent = Color3.fromRGB(80,255,140), Text = Color3.fromRGB(230,255,240), SubText = Color3.fromRGB(160,230,190), Element = Color3.fromRGB(12,30,18), ElementHover = Color3.fromRGB(22,50,30), StatusBg = Color3.fromRGB(10,24,14) },
+    NeonGold = { Bg = Color3.fromRGB(18,14,8), Accent = Color3.fromRGB(255,200,60), Text = Color3.fromRGB(255,245,220), SubText = Color3.fromRGB(230,200,140), Element = Color3.fromRGB(32,24,12), ElementHover = Color3.fromRGB(55,42,20), StatusBg = Color3.fromRGB(28,20,10) },
+    DarkMatter = { Bg = Color3.fromRGB(5,5,10), Accent = Color3.fromRGB(120,0,255), Text = Color3.fromRGB(230,230,255), SubText = Color3.fromRGB(160,160,200), Element = Color3.fromRGB(15,15,25), ElementHover = Color3.fromRGB(30,20,45), StatusBg = Color3.fromRGB(10,8,20) },
+    CrimsonVoid = { Bg = Color3.fromRGB(12,4,6), Accent = Color3.fromRGB(255,40,60), Text = Color3.fromRGB(255,230,230), SubText = Color3.fromRGB(210,150,150), Element = Color3.fromRGB(26,10,14), ElementHover = Color3.fromRGB(40,16,20), StatusBg = Color3.fromRGB(20,8,10) },
+    ArcticBlue = { Bg = Color3.fromRGB(6,12,20), Accent = Color3.fromRGB(120,210,255), Text = Color3.fromRGB(230,245,255), SubText = Color3.fromRGB(180,210,230), Element = Color3.fromRGB(16,26,36), ElementHover = Color3.fromRGB(26,40,56), StatusBg = Color3.fromRGB(12,20,30) },
+    ToxicGreen = { Bg = Color3.fromRGB(6,12,6), Accent = Color3.fromRGB(120,255,80), Text = Color3.fromRGB(220,255,220), SubText = Color3.fromRGB(170,230,170), Element = Color3.fromRGB(12,26,12), ElementHover = Color3.fromRGB(22,40,22), StatusBg = Color3.fromRGB(10,22,10) },
+    RoyalNight = { Bg = Color3.fromRGB(8,10,20), Accent = Color3.fromRGB(80,120,255), Text = Color3.fromRGB(230,235,255), SubText = Color3.fromRGB(180,190,220), Element = Color3.fromRGB(16,20,32), ElementHover = Color3.fromRGB(26,30,48), StatusBg = Color3.fromRGB(12,16,28) },
+    Rainbow = { Bg = Color3.fromRGB(10,10,14), Accent = Color3.fromRGB(255,0,80), Text = Color3.fromRGB(255,255,255), SubText = Color3.fromRGB(200,200,220), Element = Color3.fromRGB(20,20,28), ElementHover = Color3.fromRGB(32,32,44), StatusBg = Color3.fromRGB(14,14,20), Animated = true, AnimMode = "Rainbow", AnimSpeed = 0.35 },
+    Cyberpunk = { Bg = Color3.fromRGB(8,4,16), Accent = Color3.fromRGB(255,20,147), Text = Color3.fromRGB(240,240,255), SubText = Color3.fromRGB(170,140,220), Element = Color3.fromRGB(20,8,40), ElementHover = Color3.fromRGB(35,14,60), StatusBg = Color3.fromRGB(12,4,30), Animated = true, AnimMode = "Pulse", AnimSpeed = 1.6, AnimColorA = Color3.fromRGB(255,20,147), AnimColorB = Color3.fromRGB(0,220,255) },
+    Galaxy = { Bg = Color3.fromRGB(6,4,20), Accent = Color3.fromRGB(140,80,255), Text = Color3.fromRGB(230,225,255), SubText = Color3.fromRGB(170,150,230), Element = Color3.fromRGB(14,10,40), ElementHover = Color3.fromRGB(24,18,60), StatusBg = Color3.fromRGB(10,6,32), Animated = true, AnimMode = "Pulse", AnimSpeed = 1.1, AnimColorA = Color3.fromRGB(140,80,255), AnimColorB = Color3.fromRGB(255,120,220) },
+    Lava = { Bg = Color3.fromRGB(16,4,4), Accent = Color3.fromRGB(255,100,20), Text = Color3.fromRGB(255,235,220), SubText = Color3.fromRGB(230,150,100), Element = Color3.fromRGB(30,10,6), ElementHover = Color3.fromRGB(50,18,10), StatusBg = Color3.fromRGB(24,8,4), Animated = true, AnimMode = "Pulse", AnimSpeed = 2.2, AnimColorA = Color3.fromRGB(255,60,10), AnimColorB = Color3.fromRGB(255,200,40) },
+    Ice = { Bg = Color3.fromRGB(4,10,20), Accent = Color3.fromRGB(120,220,255), Text = Color3.fromRGB(230,250,255), SubText = Color3.fromRGB(170,210,240), Element = Color3.fromRGB(10,20,36), ElementHover = Color3.fromRGB(18,32,56), StatusBg = Color3.fromRGB(8,16,30), Animated = true, AnimMode = "Pulse", AnimSpeed = 0.8, AnimColorA = Color3.fromRGB(120,220,255), AnimColorB = Color3.fromRGB(220,250,255) },
+    Sunset = { Bg = Color3.fromRGB(18,8,14), Accent = Color3.fromRGB(255,130,60), Text = Color3.fromRGB(255,240,230), SubText = Color3.fromRGB(230,170,130), Element = Color3.fromRGB(32,14,22), ElementHover = Color3.fromRGB(52,22,34), StatusBg = Color3.fromRGB(26,10,18), Animated = true, AnimMode = "Pulse", AnimSpeed = 0.9, AnimColorA = Color3.fromRGB(255,90,60), AnimColorB = Color3.fromRGB(255,200,90) },
+    Matrix = { Bg = Color3.fromRGB(2,8,4), Accent = Color3.fromRGB(60,255,90), Text = Color3.fromRGB(210,255,220), SubText = Color3.fromRGB(130,200,150), Element = Color3.fromRGB(6,20,10), ElementHover = Color3.fromRGB(12,32,18), StatusBg = Color3.fromRGB(4,14,8), Animated = true, AnimMode = "Pulse", AnimSpeed = 2.5, AnimColorA = Color3.fromRGB(40,200,60), AnimColorB = Color3.fromRGB(120,255,140) },
+    BloodMoon = { Bg = Color3.fromRGB(10,2,2), Accent = Color3.fromRGB(220,0,40), Text = Color3.fromRGB(255,225,225), SubText = Color3.fromRGB(200,130,130), Element = Color3.fromRGB(24,6,8), ElementHover = Color3.fromRGB(40,10,14), StatusBg = Color3.fromRGB(18,4,6), Animated = true, AnimMode = "Pulse", AnimSpeed = 1.8, AnimColorA = Color3.fromRGB(180,0,30), AnimColorB = Color3.fromRGB(255,60,90) },
+    Vaporwave = { Bg = Color3.fromRGB(14,6,24), Accent = Color3.fromRGB(255,100,220), Text = Color3.fromRGB(255,240,255), SubText = Color3.fromRGB(200,170,240), Element = Color3.fromRGB(26,12,44), ElementHover = Color3.fromRGB(42,20,66), StatusBg = Color3.fromRGB(20,8,36), Animated = true, AnimMode = "Pulse", AnimSpeed = 1.4, AnimColorA = Color3.fromRGB(120,200,255), AnimColorB = Color3.fromRGB(255,100,220) },
+    Firefly = { Bg = Color3.fromRGB(8,10,6), Accent = Color3.fromRGB(200,255,100), Text = Color3.fromRGB(240,255,220), SubText = Color3.fromRGB(180,210,130), Element = Color3.fromRGB(16,20,12), ElementHover = Color3.fromRGB(28,34,20), StatusBg = Color3.fromRGB(12,16,8), Animated = true, AnimMode = "Pulse", AnimSpeed = 3.0, AnimColorA = Color3.fromRGB(180,240,80), AnimColorB = Color3.fromRGB(240,255,180) },
+    NeonNightclub = { Bg = Color3.fromRGB(10,2,20), Accent = Color3.fromRGB(255,0,180), Text = Color3.fromRGB(255,240,255), SubText = Color3.fromRGB(200,150,230), Element = Color3.fromRGB(24,4,40), ElementHover = Color3.fromRGB(40,8,60), StatusBg = Color3.fromRGB(18,2,32), Animated = true, AnimMode = "Strobe", AnimSpeed = 0.15, AnimColorA = Color3.fromRGB(255,0,180), AnimColorB = Color3.fromRGB(0,255,200) },
+    Aurora = { Bg = Color3.fromRGB(6,10,14), Accent = Color3.fromRGB(120,255,200), Text = Color3.fromRGB(230,255,245), SubText = Color3.fromRGB(170,220,200), Element = Color3.fromRGB(12,22,26), ElementHover = Color3.fromRGB(20,34,40), StatusBg = Color3.fromRGB(8,18,22), Animated = true, AnimMode = "Pulse", AnimSpeed = 1.0, AnimColorA = Color3.fromRGB(100,255,180), AnimColorB = Color3.fromRGB(120,200,255) },
+    Ember = { Bg = Color3.fromRGB(14,6,2), Accent = Color3.fromRGB(255,90,30), Text = Color3.fromRGB(255,235,210), SubText = Color3.fromRGB(220,140,90), Element = Color3.fromRGB(26,12,6), ElementHover = Color3.fromRGB(44,20,10), StatusBg = Color3.fromRGB(20,8,4), Animated = true, AnimMode = "Pulse", AnimSpeed = 2.8, AnimColorA = Color3.fromRGB(200,40,10), AnimColorB = Color3.fromRGB(255,140,40) },
+}
+
+local ActiveTheme = THEMES[CURRENT.Theme] or THEMES.NeonRed
+local MainFrame, MainStroke, MainGlow, StatusBar, ContentFrame
+local themeAnimTime = 0
+local uiVisible = true
+local restoreBtn = nil
+
+local function lerpColor(a, b, t)
+    return Color3.new(a.R + (b.R - a.R) * t, a.G + (b.G - a.G) * t, a.B + (b.B - a.B) * t)
+end
+
+local function ApplyVisualTheme(themeName)
+    CURRENT.Theme = themeName
+    ActiveTheme = THEMES[themeName] or THEMES.NeonRed
+    themeAnimTime = 0
+    if not ActiveTheme.Animated then
+        CURRENT.AccentColor = {
+            r = ActiveTheme.Accent.R * 255,
+            g = ActiveTheme.Accent.G * 255,
+            b = ActiveTheme.Accent.B * 255
+        }
+    end
+    if MainFrame then
+        MainFrame.BackgroundColor3 = ActiveTheme.Bg
+        MainStroke.Color = ActiveTheme.Accent
+        MainGlow.Color = ActiveTheme.Accent
+        if StatusBar then StatusBar.BackgroundColor3 = ActiveTheme.StatusBg end
+    end
+    SaveSettings()
+    ShowNotification("🎨 Theme Changed", themeName .. " applied!", 2)
+end
+
+task.spawn(function()
+    while true do
+        local dt = RunService.Heartbeat:Wait()
+        if ActiveTheme and ActiveTheme.Animated and MainFrame then
+            themeAnimTime = themeAnimTime + dt * (ActiveTheme.AnimSpeed or 1)
+            local newColor
+            local mode = ActiveTheme.AnimMode or "Pulse"
+            if mode == "Rainbow" then
+                newColor = Color3.fromHSV((themeAnimTime * 0.2) % 1, 1, 1)
+            elseif mode == "Pulse" then
+                local t = (math.sin(themeAnimTime) + 1) / 2
+                newColor = lerpColor(ActiveTheme.AnimColorA or ActiveTheme.Accent, ActiveTheme.AnimColorB or ActiveTheme.Accent, t)
+            elseif mode == "Strobe" then
+                local t = (math.floor(themeAnimTime * 2) % 2 == 0) and 0 or 1
+                newColor = lerpColor(ActiveTheme.AnimColorA or ActiveTheme.Accent, ActiveTheme.AnimColorB or ActiveTheme.Accent, t)
+            else
+                newColor = ActiveTheme.Accent
+            end
+            ActiveTheme.Accent = newColor
+            CURRENT.AccentColor = {r = newColor.R * 255, g = newColor.G * 255, b = newColor.B * 255}
+            if MainStroke then MainStroke.Color = newColor end
+            if MainGlow then MainGlow.Color = newColor end
+        end
+    end
+end)
+
+local UI = Instance.new("ScreenGui")
+UI.Name = "InvalidX_UI"
+UI.ResetOnSpawn = false
+UI.IgnoreGuiInset = true
+UI.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+UI.Parent = CoreGui
+
+-- Base dimensions
+local BASE_W, BASE_H = 360, 400
+local UI_SCALE = 1
+
+if IS_MOBILE then
+    UI_SCALE = math.clamp(VIEWPORT.X * 0.92 / BASE_W, 0.75, 1)
+elseif VIEWPORT.X < 700 then
+    UI_SCALE = math.clamp(VIEWPORT.X * 0.85 / BASE_W, 0.85, 1)
+end
+
+MainFrame = Instance.new("Frame")
+MainFrame.Name = "MainFrame"
+MainFrame.Size = UDim2.new(0, BASE_W, 0, BASE_H)
+MainFrame.Position = IS_MOBILE
+    and UDim2.new(0.5, -BASE_W/2, 0.5, -BASE_H/2)
+    or  UDim2.new(0, 25, 0, 200)
+MainFrame.BackgroundColor3 = ActiveTheme.Bg
+MainFrame.BackgroundTransparency = 0.12
+MainFrame.Active = true
+MainFrame.ClipsDescendants = true
+MainFrame.Parent = UI
+
+local uiScale = Instance.new("UIScale", MainFrame)
+uiScale.Scale = UI_SCALE
+
+Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 18)
+
+MainStroke = Instance.new("UIStroke", MainFrame)
+MainStroke.Thickness = 3
+MainStroke.Color = ActiveTheme.Accent
+
+MainGlow = Instance.new("UIStroke", MainFrame)
+MainGlow.Thickness = 12
+MainGlow.Color = ActiveTheme.Accent
+MainGlow.Transparency = 0.93
+
+local TitleBar = Instance.new("Frame")
+TitleBar.Size = UDim2.new(1, 0, 0, 45)
+TitleBar.Position = UDim2.new(0, 0, 0, 0)
+TitleBar.BackgroundTransparency = 1
+TitleBar.Parent = MainFrame
+
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, -100, 0, 30)
+Title.Position = UDim2.new(0, 12, 0, 6)
+Title.BackgroundTransparency = 1
+Title.Font = Enum.Font.GothamBold
+Title.Text = "Knife Duels v5.1"
+Title.TextColor3 = ActiveTheme.Text
+Title.TextSize = 20
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.Parent = TitleBar
+
+local SubTitle = Instance.new("TextLabel")
+SubTitle.Size = UDim2.new(1, -100, 0, 16)
+SubTitle.Position = UDim2.new(0, 12, 0, 35)
+SubTitle.BackgroundTransparency = 1
+SubTitle.Font = Enum.Font.Gotham
+SubTitle.Text = IS_MOBILE and "Mobile • InvalidX" or "InvalidX • 23 Themes • Ultimate"
+SubTitle.TextColor3 = ActiveTheme.SubText
+SubTextSize = 11
+SubTitle.TextSize = 11
+SubTitle.TextXAlignment = Enum.TextXAlignment.Left
+SubTitle.Parent = TitleBar
+
+local HideBtn = Instance.new("TextButton")
+HideBtn.Size = UDim2.new(0, 32, 0, 32)
+HideBtn.Position = UDim2.new(1, -42, 0, 7)
+HideBtn.BackgroundColor3 = ActiveTheme.Element
+HideBtn.BorderSizePixel = 0
+HideBtn.Font = Enum.Font.GothamBold
+HideBtn.Text = "−"
+HideBtn.TextColor3 = ActiveTheme.Text
+HideBtn.TextSize = 20
+HideBtn.Parent = TitleBar
+Instance.new("UICorner", HideBtn).CornerRadius = UDim.new(0, 8)
+
+local TabsFrame = Instance.new("Frame")
+TabsFrame.Size = UDim2.new(1, -14, 0, 32)
+TabsFrame.Position = UDim2.new(0, 7, 0, 52)
+TabsFrame.BackgroundTransparency = 1
+TabsFrame.Parent = MainFrame
+
+ContentFrame = Instance.new("Frame")
+ContentFrame.Size = UDim2.new(1, -14, 1, -192)
+ContentFrame.Position = UDim2.new(0, 7, 0, 92)
+ContentFrame.BackgroundTransparency = 1
+ContentFrame.ClipsDescendants = true
+ContentFrame.Parent = MainFrame
+
+StatusBar = Instance.new("Frame")
+StatusBar.Size = UDim2.new(1, -14, 0, 24)
+StatusBar.Position = UDim2.new(0, 7, 1, -29)
+StatusBar.BackgroundColor3 = ActiveTheme.StatusBg
+StatusBar.BackgroundTransparency = 0.4
+Instance.new("UICorner", StatusBar).CornerRadius = UDim.new(0, 6)
+StatusBar.Parent = MainFrame
+
+local StatusText = Instance.new("TextLabel")
+StatusText.Size = UDim2.new(1, -10, 1, 0)
+StatusText.Position = UDim2.new(0, 5, 0, 0)
+StatusText.BackgroundTransparency = 1
+StatusText.Font = Enum.Font.Gotham
+StatusText.Text = "Ready"
+StatusText.TextColor3 = ActiveTheme.SubText
+StatusText.TextSize = 10
+StatusText.TextXAlignment = Enum.TextXAlignment.Left
+StatusText.Parent = StatusBar
+
+local function UpdateStatusBar()
+    local a = AIM_Enabled and "🧠●" or "🧠○"
+    local t = Trigger_Enabled and "🎯●" or "🎯○"
+    local e = ESP_Enabled and "🌈●" or "🌈○"
+    local tp = CURRENT.ThirdPerson_Enabled and "📷●" or "📷○"
+    local sh = CURRENT.SpeedHack_Enabled and "⚡●" or "⚡○"
+    StatusText.Text = a.." "..t.." "..e.." "..tp.." "..sh.." | "..CURRENT.Theme
+end
+
+-- Entrance tween (skip on mobile for instant load)
+if not IS_MOBILE then
+    local startPos = MainFrame.Position
+    MainFrame.Position = UDim2.new(0, 25, 0, -400)
+    MainFrame.BackgroundTransparency = 1
+    MainStroke.Transparency = 1
+    MainGlow.Transparency = 1
+    MainFrame.Size = UDim2.new(0, 320, 0, 320)
+    TweenService:Create(MainFrame, TweenInfo.new(0.6, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+        Position = startPos,
+        BackgroundTransparency = 0.12,
+        Size = UDim2.new(0, BASE_W, 0, BASE_H)
+    }):Play()
+    TweenService:Create(MainStroke, TweenInfo.new(0.5), {Transparency = 0}):Play()
+    TweenService:Create(MainGlow, TweenInfo.new(0.5), {Transparency = 0.93}):Play()
+end
+
+task.delay(0.3, UpdateStatusBar)
+
+-- Restore button (mobile-friendly)
+restoreBtn = Instance.new("TextButton")
+restoreBtn.Name = "InvalidX_RestoreBtn"
+restoreBtn.Size = UDim2.new(0, 50, 0, 50)
+restoreBtn.Position = UDim2.new(1, -66, 0, 14)
+restoreBtn.BackgroundColor3 = ActiveTheme.Bg
+restoreBtn.BackgroundTransparency = 0.15
+restoreBtn.BorderSizePixel = 0
+restoreBtn.Font = Enum.Font.GothamBold
+restoreBtn.Text = "IX"
+restoreBtn.TextColor3 = ActiveTheme.Accent
+restoreBtn.TextSize = 18
+restoreBtn.Visible = false
+restoreBtn.Active = true
+Instance.new("UICorner", restoreBtn).CornerRadius = UDim.new(1, 0)
+restoreBtn.Parent = UI
+
+local restoreStroke = Instance.new("UIStroke", restoreBtn)
+restoreStroke.Thickness = 2
+restoreStroke.Color = ActiveTheme.Accent
+
+-- ═══════════════════════════════════════════════════════════════
+--  DRAG HANDLER — supports mouse AND touch
+-- ═══════════════════════════════════════════════════════════════
+do
+    local dragging = false
+    local dragStart, startPos
+
+    local function beginDrag(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = input.Position
+            startPos = MainFrame.Position
+        end
+    end
+
+    local function endDrag(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end
+
+    local function moveDrag(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+            or input.UserInputType == Enum.UserInputType.Touch) then
+            local delta = input.Position - dragStart
+            MainFrame.Position = UDim2.new(
+                startPos.X.Scale,
+                startPos.X.Offset + delta.X,
+                startPos.Y.Scale,
+                startPos.Y.Offset + delta.Y
+            )
+        end
+    end
+
+    TitleBar.InputBegan:Connect(beginDrag)
+    TitleBar.InputEnded:Connect(endDrag)
+    UserInputService.InputChanged:Connect(moveDrag)
+end
+
+local function ToggleUI(show)
+    if show == nil then show = not uiVisible end
+    uiVisible = show
+    MainFrame.Visible = show
+    if show then
+        restoreBtn.Visible = false
+    else
+        restoreBtn.Visible = true
+    end
+end
+
+HideBtn.MouseButton1Click:Connect(function() ToggleUI(false) end)
+restoreBtn.MouseButton1Click:Connect(function() ToggleUI(true) end)
+
+local function ClearContent()
+    for _, v in ipairs(ContentFrame:GetChildren()) do v:Destroy() end
+end
+
+-- Tabs
+local tabButtons = {}
+local activeTab = nil
+
+local function SetActiveTab(name)
+    activeTab = name
+    for tn, btn in pairs(tabButtons) do
+        if tn == name then
+            btn.BackgroundColor3 = ActiveTheme.Accent
+            btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+            btn.BackgroundTransparency = 0
+        else
+            btn.BackgroundColor3 = ActiveTheme.Element
+            btn.TextColor3 = ActiveTheme.SubText
+            btn.BackgroundTransparency = 0.3
+        end
+    end
+end
+
+local function MakeTabButton(text, index)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0, 55, 1, 0)
+    btn.Position = UDim2.new(0, (index-1)*57, 0, 0)
+    btn.BackgroundColor3 = ActiveTheme.Element
+    btn.BackgroundTransparency = 0.3
+    btn.Font = Enum.Font.GothamSemibold
+    btn.Text = text
+    btn.TextColor3 = ActiveTheme.SubText
+    btn.TextSize = 11
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 8)
+    btn.Parent = TabsFrame
+    tabButtons[text] = btn
+    return btn
+end
+
+-- ═══════════════════════════════════════════════════════════════
+--  TOGGLE WIDGET
+-- ═══════════════════════════════════════════════════════════════
+local function MakeToggle(name, state, callback, y)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, 0, 0, 40)
+    btn.Position = UDim2.new(0, 0, 0, y)
+    btn.BackgroundColor3 = ActiveTheme.Element
+    btn.BackgroundTransparency = 0.35
+    btn.Font = Enum.Font.GothamSemibold
+    btn.Text = "   "..name.."    "..(state and "✅ ON" or "❌ OFF")
+    btn.TextColor3 = ActiveTheme.Text
+    btn.TextSize = 13
+    btn.TextXAlignment = Enum.TextXAlignment.Left
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 8)
+    btn.Parent = ContentFrame
+
+    btn.MouseButton1Click:Connect(function()
+        state = not state
+        btn.Text = "   "..name.."    "..(state and "✅ ON" or "❌ OFF")
+        callback(state)
+        SaveSettings()
+        UpdateStatusBar()
+    end)
+    return btn
+end
+
+-- ═══════════════════════════════════════════════════════════════
+--  DROPDOWN WIDGET
+-- ═══════════════════════════════════════════════════════════════
+local function MakeDropdown(name, options, currentIndex, callback, y)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, 0, 0, 40)
+    btn.Position = UDim2.new(0, 0, 0, y)
+    btn.BackgroundColor3 = ActiveTheme.Element
+    btn.BackgroundTransparency = 0.35
+    btn.Font = Enum.Font.GothamSemibold
+    btn.Text = "   "..name.."    "..options[currentIndex]
+    btn.TextColor3 = ActiveTheme.Text
+    btn.TextSize = 13
+    btn.TextXAlignment = Enum.TextXAlignment.Left
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 8)
+    btn.Parent = ContentFrame
+
+    local idx = currentIndex
+    btn.MouseButton1Click:Connect(function()
+        idx = idx + 1
+        if idx > #options then idx = 1 end
+        btn.Text = "   "..name.."    "..options[idx]
+        callback(options[idx])
+        SaveSettings()
+    end)
+    return btn
+end
+
+-- ═══════════════════════════════════════════════════════════════
+--  SLIDER WIDGET — supports mouse AND touch
+-- ═══════════════════════════════════════════════════════════════
+local function MakeSlider(name, value, min, max, decimals, callback, y)
+    local container = Instance.new("Frame")
+    container.Size = UDim2.new(1, 0, 0, 50)
+    container.Position = UDim2.new(0, 0, 0, y)
+    container.BackgroundTransparency = 1
+    container.Parent = ContentFrame
+
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(1, 0, 0, 22)
+    label.Position = UDim2.new(0, 0, 0, 0)
+    label.BackgroundTransparency = 1
+    label.Font = Enum.Font.GothamSemibold
+    label.Text = "   "..name.."    "..string.format("%."..decimals.."f", value)
+    label.TextColor3 = ActiveTheme.Text
+    label.TextSize = 13
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Parent = container
+
+    -- Bigger hit area for mobile
+    local hitArea = Instance.new("Frame")
+    hitArea.Size = UDim2.new(1, -20, 0, 20)
+    hitArea.Position = UDim2.new(0, 10, 0, 26)
+    hitArea.BackgroundColor3 = ActiveTheme.Element
+    hitArea.BackgroundTransparency = 0.5
+    hitArea.BorderSizePixel = 0
+    Instance.new("UICorner", hitArea).CornerRadius = UDim.new(0, 6)
+    hitArea.Parent = container
+
+    local barBg = Instance.new("Frame")
+    barBg.Size = UDim2.new(1, -8, 0, 6)
+    barBg.Position = UDim2.new(0, 4, 0.5, -3)
+    barBg.BackgroundColor3 = ActiveTheme.Bg
+    barBg.BackgroundTransparency = 0.5
+    barBg.BorderSizePixel = 0
+    barBg.ZIndex = 2
+    Instance.new("UICorner", barBg).CornerRadius = UDim.new(0, 3)
+    barBg.Parent = hitArea
+
+    local barFill = Instance.new("Frame")
+    barFill.Size = UDim2.new((value - min) / (max - min), 0, 1, 0)
+    barFill.BackgroundColor3 = ActiveTheme.Accent
+    barFill.BackgroundTransparency = 0
+    barFill.BorderSizePixel = 0
+    barFill.ZIndex = 3
+    Instance.new("UICorner", barFill).CornerRadius = UDim.new(0, 3)
+    barFill.Parent = barBg
+
+    local dragging = false
+    local function UpdateFromX(x)
+        local px = math.clamp((x - barBg.AbsolutePosition.X) / barBg.AbsoluteSize.X, 0, 1)
+        local v = min + px * (max - min)
+        v = tonumber(string.format("%."..decimals.."f", v))
+        label.Text = "   "..name.."    "..string.format("%."..decimals.."f", v)
+        barFill.Size = UDim2.new(px, 0, 1, 0)
+        callback(v)
+        SaveSettings()
+    end
+
+    local function beginSlider(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            UpdateFromX(input.Position.X)
+        end
+    end
+
+    local function endSlider(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end
+
+    local function moveSlider(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+            or input.UserInputType == Enum.UserInputType.Touch) then
+            UpdateFromX(input.Position.X)
+        end
+    end
+
+    hitArea.InputBegan:Connect(beginSlider)
+    hitArea.InputEnded:Connect(endSlider)
+    UserInputService.InputChanged:Connect(moveSlider)
+
+    return container
+end
+
+-- ═══════════════════════════════════════════════════════════════
+--  KEYBIND WIDGET (with mobile info)
+-- ═══════════════════════════════════════════════════════════════
+local waitingBind = nil
+
+local function MakeKeybind(name, keycode, setter, y)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, 0, 0, 40)
+    btn.Position = UDim2.new(0, 0, 0, y)
+    btn.BackgroundColor3 = ActiveTheme.Element
+    btn.BackgroundTransparency = 0.35
+    btn.Font = Enum.Font.GothamSemibold
+    btn.Text = "   "..name.."    "..(keycode and keycode.Name or "None")
+    btn.TextColor3 = ActiveTheme.Text
+    btn.TextSize = 13
+    btn.TextXAlignment = Enum.TextXAlignment.Left
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 8)
+    btn.Parent = ContentFrame
+
+    btn.MouseButton1Click:Connect(function()
+        if IS_MOBILE then
+            ShowNotification("📱 Mobile", "No keyboard — use toggle buttons instead", 3)
+            return
+        end
+        waitingBind = {Button = btn, Set = setter, Label = name, Old = keycode}
+        btn.Text = "   "..name.."    [PRESS ANY KEY]"
+        btn.BackgroundColor3 = ActiveTheme.Accent
+    end)
+end
+
+-- ═══════════════════════════════════════════════════════════════
+--  KEYBIND HANDLER
+-- ═══════════════════════════════════════════════════════════════
+UserInputService.InputBegan:Connect(function(input, gpe)
+    if gpe then return end
+
+    if waitingBind and input.KeyCode ~= Enum.KeyCode.Unknown then
+        local kc = input.KeyCode
+        waitingBind.Button.Text = "   "..waitingBind.Label.."    "..kc.Name
+        waitingBind.Button.BackgroundColor3 = ActiveTheme.Element
+        waitingBind.Set(kc)
+        waitingBind = nil
+        SaveSettings()
+        ShowNotification("⌨️ Bound", kc.Name .. " assigned", 1.5)
+        return
+    end
+
+    if input.KeyCode == KB_TRIG then
+        Trigger_Enabled = not Trigger_Enabled
+        CURRENT.Trigger_Enabled = Trigger_Enabled
+        IX.Trigger_Enabled = Trigger_Enabled
+        UpdateStatusBar()
+        ShowNotification(Trigger_Enabled and "🎯 Trigger ON" or "🎯 Trigger OFF", KB_TRIG.Name, 1.5)
+        SaveSettings()
+    elseif input.KeyCode == KB_AIM then
+        AIM_Enabled = not AIM_Enabled
+        CURRENT.AIM_Enabled = AIM_Enabled
+        IX.AIM_Enabled = AIM_Enabled
+        UpdateStatusBar()
+        ShowNotification(AIM_Enabled and "🧠 Aim ON" or "🧠 Aim OFF", KB_AIM.Name, 1.5)
+        SaveSettings()
+    elseif input.KeyCode == KB_ESP then
+        ESP_Enabled = not ESP_Enabled
+        CURRENT.ESP_Enabled = ESP_Enabled
+        IX.ESP_Enabled = ESP_Enabled
+        UpdateStatusBar()
+        ShowNotification(ESP_Enabled and "🌈 ESP ON" or "🌈 ESP OFF", KB_ESP.Name, 1.5)
+        SaveSettings()
+    elseif input.KeyCode == KB_TP then
+        CURRENT.ThirdPerson_Enabled = not CURRENT.ThirdPerson_Enabled
+        UpdateStatusBar()
+        ShowNotification(CURRENT.ThirdPerson_Enabled and "📷 TP ON" or "📷 TP OFF", KB_TP.Name, 1.5)
+        SaveSettings()
+    elseif input.KeyCode == KB_SH then
+        CURRENT.SpeedHack_Enabled = not CURRENT.SpeedHack_Enabled
+        UpdateStatusBar()
+        ShowNotification(CURRENT.SpeedHack_Enabled and "⚡ Speed ON" or "⚡ Speed OFF", KB_SH.Name, 1.5)
+        SaveSettings()
+    elseif input.KeyCode == KB_UI then
+        ToggleUI()
+    elseif input.KeyCode == KB_PANIC then
+        AIM_Enabled = false
+        Trigger_Enabled = false
+        ESP_Enabled = false
+        CURRENT.AIM_Enabled = false
+        CURRENT.Trigger_Enabled = false
+        CURRENT.ESP_Enabled = false
+        CURRENT.ThirdPerson_Enabled = false
+        CURRENT.SpeedHack_Enabled = false
+        IX.AIM_Enabled = false
+        IX.Trigger_Enabled = false
+        IX.ESP_Enabled = false
+        UpdateStatusBar()
+        ShowNotification("🚨 PANIC", "All features off", 2)
+        SaveSettings()
+    end
+end)
+
+-- ═══════════════════════════════════════════════════════════════
+--  TAB BUILDERS
+-- ═══════════════════════════════════════════════════════════════
+
+local function BuildAimTab()
+    ClearContent()
+    SetActiveTab("AIM")
+    MakeToggle("Aim Assist", AIM_Enabled, function(s)
+        AIM_Enabled = s
+        CURRENT.AIM_Enabled = s
+        IX.AIM_Enabled = s
+        UpdateStatusBar()
+    end, 0)
+    MakeSlider("Aim Smoothness", CURRENT.AIM_Smoothness, 0.10, 0.40, 2, function(v)
+        CURRENT.AIM_Smoothness = v
+        AIM_CONFIG.Smoothness = v
+        AIM_CONFIG.Pull = v
+    end, 50)
+    MakeDropdown("Aim At", {"UpperTorso", "Head"}, CURRENT.AIM_AimPart == "Head" and 2 or 1, function(p)
+        CURRENT.AIM_AimPart = p
+        AIM_CONFIG.AimPart = p
+    end, 110)
+end
+
+local function BuildESPTab()
+    ClearContent()
+    SetActiveTab("ESP")
+    MakeToggle("ESP", ESP_Enabled, function(s)
+        ESP_Enabled = s
+        CURRENT.ESP_Enabled = s
+        IX.ESP_Enabled = s
+        UpdateStatusBar()
+    end, 0)
+
+    local modeMap = {Skeleton = 1, Tracers = 2, Both = 3, NameOnly = 4, Boxes = 5, HeadDot = 6}
+    local modeIdx = modeMap[CURRENT.ESP_Mode] or 1
+    MakeDropdown("ESP Mode", {"Skeleton", "Tracers", "Both", "NameOnly", "Boxes", "HeadDot"}, modeIdx, function(m)
+        CURRENT.ESP_Mode = m
+    end, 50)
+
+    MakeToggle("Show Player Name", CURRENT.ESP_ShowName, function(s)
+        CURRENT.ESP_ShowName = s
+        IX.ESP_ShowName = s
+    end, 100)
+    MakeToggle("Show Distance", CURRENT.ESP_ShowDistance, function(s)
+        CURRENT.ESP_ShowDistance = s
+        IX.ESP_ShowDistance = s
+    end, 148)
+
+    local colorModeIdx = CURRENT.ESP_ColorMode == "Solid" and 2 or 1
+    MakeDropdown("Color Mode", {"Rainbow", "Solid"}, colorModeIdx, function(m)
+        CURRENT.ESP_ColorMode = m
+    end, 198)
+
+    MakeSlider("Rainbow Speed", CURRENT.RainbowSpeed, 0.3, 3.0, 1, function(v)
+        CURRENT.RainbowSpeed = v
+    end, 250)
+
+    local colors = {
+        {n = "Cyan",  v = {r = 0,   g = 170, b = 255}},
+        {n = "Red",   v = {r = 255, g = 60,  b = 80}},
+        {n = "Purple",v = {r = 180, g = 80,  b = 255}},
+        {n = "Lime",  v = {r = 80,  g = 255, b = 140}},
+        {n = "Gold",  v = {r = 255, g = 200, b = 60}},
+        {n = "White", v = {r = 255, g = 255, b = 255}},
+        {n = "Pink",  v = {r = 255, g = 100, b = 200}},
+        {n = "Orange",v = {r = 255, g = 140, b = 40}},
+    }
+    local names, idx = {}, 1
+    for i, c in ipairs(colors) do
+        names[i] = c.n
+        if CURRENT.ESP_SolidColor.r == c.v.r and CURRENT.ESP_SolidColor.g == c.v.g and CURRENT.ESP_SolidColor.b == c.v.b then
+            idx = i
+        end
+    end
+    MakeDropdown("Solid Preset", names, idx, function(n)
+        for _, c in ipairs(colors) do
+            if c.n == n then
+                CURRENT.ESP_SolidColor = c.v
+                SaveSettings()
+                break
+            end
+        end
+    end, 310)
+
+    MakeSlider("Line Thickness", CURRENT.LineThickness, 1.0, 3.0, 1, function(v)
+        CURRENT.LineThickness = v
+    end, 368)
+end
+
+local function BuildAlertTab()
+    ClearContent()
+    SetActiveTab("ALERT")
+    MakeToggle("Alert High Level", CURRENT.AlertHighLevel, function(s) CURRENT.AlertHighLevel = s end, 0)
+    MakeSlider("Level Threshold", CURRENT.AlertLevelThreshold, 50, 500, 0, function(v)
+        CURRENT.AlertLevelThreshold = math.floor(v)
+    end, 50)
+    MakeToggle("Alert High Winstreak", CURRENT.AlertHighStreak, function(s) CURRENT.AlertHighStreak = s end, 108)
+    MakeSlider("Streak Threshold", CURRENT.AlertStreakThreshold, 3, 50, 0, function(v)
+        CURRENT.AlertStreakThreshold = math.floor(v)
+    end, 158)
+    MakeToggle("Alert Rushers", CURRENT.AlertRushers, function(s) CURRENT.AlertRushers = s end, 216)
+    MakeSlider("Rusher Distance", CURRENT.AlertRusherDistance, 15, 80, 0, function(v)
+        CURRENT.AlertRusherDistance = math.floor(v)
+    end, 266)
+    MakeToggle("Alert Aim Lock", CURRENT.AlertAimLock, function(s) CURRENT.AlertAimLock = s end, 324)
+    MakeSlider("Aim Lock Angle", CURRENT.AlertAimLockAngle, 5, 25, 0, function(v)
+        CURRENT.AlertAimLockAngle = math.floor(v)
+    end, 374)
+    MakeToggle("Alert Backstab", CURRENT.AlertBackstab, function(s) CURRENT.AlertBackstab = s end, 432)
+    MakeSlider("Backstab Distance", CURRENT.AlertBackstabDistance, 10, 60, 0, function(v)
+        CURRENT.AlertBackstabDistance = math.floor(v)
+    end, 482)
+end
+
+local function BuildTrigTab()
+    ClearContent()
+    SetActiveTab("TRIG")
+    MakeToggle("Triggerbot", Trigger_Enabled, function(s)
+        Trigger_Enabled = s
+        CURRENT.Trigger_Enabled = s
+        IX.Trigger_Enabled = s
+        UpdateStatusBar()
+    end, 0)
+    MakeSlider("Trigger Delay", CURRENT.Trigger_Delay, 0.02, 0.30, 2, function(v)
+        CURRENT.Trigger_Delay = v
+    end, 50)
+end
+
+local function BuildMiscTab()
+    ClearContent()
+    SetActiveTab("MISC")
+    MakeToggle("Third Person", CURRENT.ThirdPerson_Enabled, function(s)
+        CURRENT.ThirdPerson_Enabled = s
+        UpdateStatusBar()
+    end, 0)
+    MakeToggle("SpeedHack (CFrame)", CURRENT.SpeedHack_Enabled, function(s)
+        CURRENT.SpeedHack_Enabled = s
+        UpdateStatusBar()
+    end, 48)
+    MakeSlider("Speed Value", CURRENT.SpeedHack_Value, 16, 35, 0, function(v)
+        CURRENT.SpeedHack_Value = math.floor(v)
+    end, 98)
+
+    local info = Instance.new("TextLabel")
+    info.Size = UDim2.new(1, 0, 0, 140)
+    info.Position = UDim2.new(0, 0, 0, 158)
+    info.BackgroundTransparency = 1
+    info.Font = Enum.Font.Gotham
+    info.Text = IS_MOBILE
+        and "Tap toggles to enable features.\n\nCFrame SpeedHack bypasses normal WalkSpeed.\n\nDrag title bar with finger to move UI."
+        or "Toggle features here.\n\nCFrame SpeedHack bypasses WalkSpeed.\nMax: 35.\n\nAll keybinds customizable in SET tab."
+    info.TextColor3 = ActiveTheme.SubText
+    info.TextSize = 11
+    info.TextXAlignment = Enum.TextXAlignment.Left
+    info.TextYAlignment = Enum.TextYAlignment.Top
+    info.TextWrapped = true
+    info.Parent = ContentFrame
+end
+
+local function BuildSettingsTab()
+    ClearContent()
+    SetActiveTab("SET")
+
+    local themes = {
+        "NeonRed","NeonPurple","NeonAqua","NeonLime","NeonGold",
+        "DarkMatter","CrimsonVoid","ArcticBlue","ToxicGreen","RoyalNight",
+        "Rainbow","Cyberpunk","Galaxy","Lava","Ice","Sunset","Matrix",
+        "BloodMoon","Vaporwave","Firefly","NeonNightclub","Aurora","Ember"
+    }
+    local idx = 1
+    for i, t in ipairs(themes) do
+        if CURRENT.Theme == t then idx = i end
+    end
+    MakeDropdown("🎨 Theme", themes, idx, ApplyVisualTheme, 0)
+
+    local nextY = 58
+    if not IS_MOBILE then
+        MakeKeybind("Aim Toggle", KB_AIM, function(k)
+            KB_AIM = k; CURRENT.KB_AimToggle = k.Value; IX.KB_AIM = k
+        end, nextY); nextY = nextY + 48
+        MakeKeybind("Trigger Toggle", KB_TRIG, function(k)
+            KB_TRIG = k; CURRENT.KB_TriggerToggle = k.Value; IX.KB_TRIG = k
+        end, nextY); nextY = nextY + 48
+        MakeKeybind("ESP Toggle", KB_ESP, function(k)
+            KB_ESP = k; CURRENT.KB_ESPToggle = k.Value; IX.KB_ESP = k
+        end, nextY); nextY = nextY + 48
+        MakeKeybind("ThirdPerson Toggle", KB_TP, function(k)
+            KB_TP = k; CURRENT.KB_ThirdPerson = k.Value; IX.KB_TP = k
+        end, nextY); nextY = nextY + 48
+        MakeKeybind("SpeedHack Toggle", KB_SH, function(k)
+            KB_SH = k; CURRENT.KB_SpeedHack = k.Value; IX.KB_SH = k
+        end, nextY); nextY = nextY + 48
+        MakeKeybind("UI Toggle", KB_UI, function(k)
+            KB_UI = k; CURRENT.KB_UIToggle = k.Value; IX.KB_UI = k
+        end, nextY); nextY = nextY + 48
+        MakeKeybind("Panic", KB_PANIC, function(k)
+            KB_PANIC = k; CURRENT.KB_Panic = k.Value; IX.KB_PANIC = k
+        end, nextY); nextY = nextY + 48
+    else
+        local info = Instance.new("TextLabel")
+        info.Size = UDim2.new(1, 0, 0, 60)
+        info.Position = UDim2.new(0, 0, 0, nextY)
+        info.BackgroundColor3 = ActiveTheme.Element
+        info.BackgroundTransparency = 0.5
+        info.Font = Enum.Font.Gotham
+        info.Text = "📱 Mobile mode — no physical keyboard. Use toggle buttons in each tab to enable features."
+        info.TextColor3 = ActiveTheme.SubText
+        info.TextSize = 11
+        info.TextWrapped = true
+        info.TextXAlignment = Enum.TextXAlignment.Left
+        Instance.new("UICorner", info).CornerRadius = UDim.new(0, 8)
+        info.Parent = ContentFrame
+    end
+end
+
+local AimTabBtn  = MakeTabButton("AIM", 1)
+local ESPTabBtn  = MakeTabButton("ESP", 2)
+local AlertTabBtn= MakeTabButton("ALERT", 3)
+local TrigTabBtn = MakeTabButton("TRIG", 4)
+local MiscTabBtn = MakeTabButton("MISC", 5)
+local SetTabBtn  = MakeTabButton("SET", 6)
+
+AimTabBtn.MouseButton1Click:Connect(BuildAimTab)
+ESPTabBtn.MouseButton1Click:Connect(BuildESPTab)
+AlertTabBtn.MouseButton1Click:Connect(BuildAlertTab)
+TrigTabBtn.MouseButton1Click:Connect(BuildTrigTab)
+MiscTabBtn.MouseButton1Click:Connect(BuildMiscTab)
+SetTabBtn.MouseButton1Click:Connect(BuildSettingsTab)
+
+BuildAimTab()
+
+-- ═══════════════════════════════════════════════════════════════
+--  THIRD PERSON
+-- ═══════════════════════════════════════════════════════════════
+local originalCameraMaxZoom = nil
+local originalCameraMinZoom = nil
+
+task.spawn(function()
+    while true do
+        RunService.Heartbeat:Wait()
+        if CURRENT.ThirdPerson_Enabled then
+            if not originalCameraMaxZoom then
+                originalCameraMaxZoom = LocalPlayer.CameraMaxZoomDistance
+                originalCameraMinZoom = LocalPlayer.CameraMinZoomDistance
+            end
+            pcall(function()
+                LocalPlayer.CameraMaxZoomDistance = 20
+                LocalPlayer.CameraMinZoomDistance = 8
+                LocalPlayer.CameraMode = Enum.CameraMode.Classic
+            end)
+        else
+            if originalCameraMaxZoom then
+                pcall(function()
+                    LocalPlayer.CameraMaxZoomDistance = originalCameraMaxZoom
+                    LocalPlayer.CameraMinZoomDistance = originalCameraMinZoom
+                end)
+                originalCameraMaxZoom = nil
+                originalCameraMinZoom = nil
+            end
+        end
+    end
+end)
+
+-- ═══════════════════════════════════════════════════════════════
+--  SPEEDHACK
+-- ═══════════════════════════════════════════════════════════════
+task.spawn(function()
+    while true do
+        local dt = RunService.Heartbeat:Wait()
+        if CURRENT.SpeedHack_Enabled then
+            local char = LocalPlayer.Character
+            if char then
+                local root = char:FindFirstChild("HumanoidRootPart")
+                local hum  = char:FindFirstChildOfClass("Humanoid")
+                if root and hum and hum.Health > 0 then
+                    local moveDir = hum.MoveDirection
+                    if moveDir.Magnitude > 0.01 then
+                        local targetSpeed = tonumber(CURRENT.SpeedHack_Value) or 25
+                        local baseSpeed   = 16
+                        local extraSpeed  = targetSpeed - baseSpeed
+                        if extraSpeed > 0 then
+                            local delta = moveDir.Unit * extraSpeed * dt
+                            pcall(function()
+                                root.CFrame = root.CFrame + delta
+                            end)
+                        end
+                    end
+                end
+            end
+        end
+    end
+end)
+
+-- ═══════════════════════════════════════════════════════════════
+--  MAIN RENDER LOOP
+-- ═══════════════════════════════════════════════════════════════
+local lastTriggerTime = 0
+
+RunService.RenderStepped:Connect(function()
+    Camera = Workspace.CurrentCamera
+
+    if AIM_Enabled then
+        local T = GetAimTarget()
+        if T then
+            local P = T.Pos
+            if AIM_CONFIG.Predict and T.HRP then
+                P = P + T.HRP.Velocity * 0.045
+            end
+            local SP, OnS = Camera:WorldToViewportPoint(P)
+            if OnS then
+                local CX = Camera.ViewportSize.X / 2
+                local CY = Camera.ViewportSize.Y / 2
+                local Ox = SP.X - CX
+                local Oy = SP.Y - CY
+                local D  = math.sqrt(Ox^2 + Oy^2)
+                local M  = AIM_CONFIG.MaxCorrection
+                if D > M then
+                    local S = M / D
+                    Ox = Ox * S
+                    Oy = Oy * S
+                end
+                local Ray = Camera:ViewportPointToRay(CX + Ox, CY + Oy)
+                Camera.CFrame = Camera.CFrame:Lerp(
+                    CFrame.new(Camera.CFrame.Position, Camera.CFrame.Position + Ray.Direction * 500),
+                    AIM_CONFIG.Smoothness
+                )
+            end
+        end
+    end
+
+    if ESP_Enabled then
+        for ply, data in pairs(PlayerData) do
+            if ply == LocalPlayer then continue end
+            local c = data.Char
+            if not c or not c.Parent then
+                for _, l in ipairs(data.Lines) do l.Visible = false end
+                if data.Tracer then data.Tracer.Visible = false end
+                if data.Info   then data.Info.Visible   = false end
+                if data.Box    then data.Box.Visible    = false end
+                continue
+            end
+            local hrp = c:FindFirstChild("HumanoidRootPart")
+            local hum = c:FindFirstChild("Humanoid")
+            if not hrp or not hum or hum.Health <= 0 then
+                for _, l in ipairs(data.Lines) do l.Visible = false end
+                if data.Tracer then data.Tracer.Visible = false end
+                if data.Info   then data.Info.Visible   = false end
+                if data.Box    then data.Box.Visible    = false end
+                continue
+            end
+            local dist = (Camera.CFrame.Position - hrp.Position).Magnitude
+            if dist > CURRENT.MaxDistance then
+                for _, l in ipairs(data.Lines) do l.Visible = false end
+                if data.Tracer then data.Tracer.Visible = false end
+                if data.Info   then data.Info.Visible   = false end
+                if data.Box    then data.Box.Visible    = false end
+                continue
+            end
+            local team  = IsTeammate(ply)
+            local color = GetESPColor(team)
+            local mode  = CURRENT.ESP_Mode
+
+            local function W2D(pos)
+                local v, onscr = Camera:WorldToViewportPoint(pos)
+                return Vector2.new(v.X, v.Y), onscr, v.Z
+            end
+
+            local HRP2D, onscr, z = W2D(hrp.Position)
+            if not onscr or z < 0 then
+                for _, l in ipairs(data.Lines) do l.Visible = false end
+                if data.Tracer then data.Tracer.Visible = false end
+                if data.Info   then data.Info.Visible   = false end
+                if data.Box    then data.Box.Visible    = false end
+                continue
+            end
+
+            if mode == "NameOnly" then
+                for _, l in ipairs(data.Lines) do l.Visible = false end
+                if data.Tracer then data.Tracer.Visible = false end
+                if data.Box    then data.Box.Visible    = false end
+                if data.Info then
+                    data.Info.Position = Vector2.new(HRP2D.X, HRP2D.Y - 50)
+                    data.Info.Text     = ply.Name
+                    data.Info.Color    = color
+                    data.Info.Size     = 14
+                    data.Info.Visible  = true
+                end
+                continue
+            end
+
+            if mode == "Skeleton" or mode == "Both" then
+                for i, j in ipairs(data.Joints) do
+                    local l = data.Lines[i]
+                    if l and j.From and j.To then
+                        local p1, a1 = W2D(j.From.Position)
+                        local p2, a2 = W2D(j.To.Position)
+                        if a1 and a2 then
+                            l.From = Vector2.new(p1.X, p1.Y)
+                            l.To   = Vector2.new(p2.X, p2.Y)
+                            l.Color = color
+                            l.Thickness = CURRENT.LineThickness
+                            l.Visible = true
+                        else
+                            l.Visible = false
+                        end
+                    end
+                end
+            else
+                for _, l in ipairs(data.Lines) do l.Visible = false end
+            end
+
+            if mode == "Tracers" or mode == "Both" then
+                if data.Tracer then
+                    local mid = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
+                    data.Tracer.From = mid
+                    data.Tracer.To   = HRP2D
+                    data.Tracer.Color = color
+                    data.Tracer.Thickness = CURRENT.LineThickness
+                    data.Tracer.Visible = true
+                end
+            else
+                if data.Tracer then data.Tracer.Visible = false end
+            end
+
+            if mode == "Boxes" then
+                local t, _ = W2D(hrp.Position + Vector3.new(0, 3, 0))
+                local b, _ = W2D(hrp.Position - Vector3.new(0, 1.5, 0))
+                if data.Box then
+                    data.Box.Position = Vector2.new(t.X - 30, t.Y)
+                    data.Box.Size     = Vector2.new(60, b.Y - t.Y)
+                    data.Box.Color    = color
+                    data.Box.Thickness= 1.8
+                    data.Box.Visible  = true
+                end
+            elseif mode == "HeadDot" then
+                local head = c:FindFirstChild("Head")
+                if head and data.Box then
+                    local h2d, ok, _ = W2D(head.Position)
+                    if ok then
+                        data.Box.Position = Vector2.new(h2d.X - 4, h2d.Y - 4)
+                        data.Box.Size     = Vector2.new(8, 8)
+                        data.Box.Color    = color
+                        data.Box.Thickness= 1.5
+                        data.Box.Visible  = true
+                    else
+                        data.Box.Visible = false
+                    end
+                end
+            else
+                if data.Box then data.Box.Visible = false end
+            end
+
+            if data.Info then
+                local textParts = {}
+                if CURRENT.ESP_ShowName     then table.insert(textParts, ply.Name) end
+                if CURRENT.ESP_ShowDistance then table.insert(textParts, "["..math.floor(dist).."m]") end
+                if #textParts > 0 then
+                    data.Info.Position = Vector2.new(HRP2D.X - 45, HRP2D.Y - 50)
+                    data.Info.Text     = table.concat(textParts, " ")
+                    data.Info.Color    = color
+                    data.Info.Size     = 14
+                    data.Info.Visible  = true
+                else
+                    data.Info.Visible = false
+                end
+            end
+        end
+    else
+        for _, d in pairs(PlayerData) do
+            for _, l in ipairs(d.Lines) do l.Visible = false end
+            if d.Tracer then d.Tracer.Visible = false end
+            if d.Info   then d.Info.Visible   = false end
+            if d.Box    then d.Box.Visible    = false end
+        end
+    end
+
+    local localChar = LocalPlayer.Character
+    local localHRP  = localChar and localChar:FindFirstChild("HumanoidRootPart")
+    if localHRP then
+        for _, ply in ipairs(Players:GetPlayers()) do
+            if ply == LocalPlayer then continue end
+            local c = ply.Character
+            if not c then continue end
+            local hrp = c:FindFirstChild("HumanoidRootPart")
+            local hum = c:FindFirstChild("Humanoid")
+            if not hrp or not hum or hum.Health <= 0 then continue end
+            local dist = (localHRP.Position - hrp.Position).Magnitude
+            local state = ThreatState[ply]
+            if not state then
+                state = {lastRusherAlert = 0, lastAimLockAlert = 0, lastBackstabAlert = 0}
+                ThreatState[ply] = state
+            end
+
+            if CURRENT.AlertRushers and dist <= CURRENT.AlertRusherDistance then
+                local vel = hrp.Velocity
+                if vel.Magnitude > 10 then
+                    local dirToMe = (localHRP.Position - hrp.Position).Unit
+                    if vel.Unit:Dot(dirToMe) > 0.7 and tick() - state.lastRusherAlert > 3 then
+                        state.lastRusherAlert = tick()
+                        ShowNotification("⚠️ RUSHER", ply.Name, 3)
+                    end
+                end
+            end
+
+            if CURRENT.AlertAimLock and dist <= CURRENT.AlertRusherDistance * 2 then
+                local look = hrp.CFrame.LookVector
+                local dirToMe = (localHRP.Position - hrp.Position).Unit
+                local dot = look:Dot(dirToMe)
+                local angle = math.deg(math.acos(math.clamp(dot, -1, 1)))
+                if angle <= CURRENT.AlertAimLockAngle and tick() - state.lastAimLockAlert > 4 then
+                    state.lastAimLockAlert = tick()
+                    ShowNotification("⚠️ AIM-LOCK", ply.Name, 3)
+                end
+            end
+
+            if CURRENT.AlertBackstab and dist <= CURRENT.AlertBackstabDistance then
+                local myLook = localHRP.CFrame.LookVector
+                local dirToEnemy = (hrp.Position - localHRP.Position).Unit
+                if myLook:Dot(dirToEnemy) < -0.4 and tick() - state.lastBackstabAlert > 3 then
+                    state.lastBackstabAlert = tick()
+                    ShowNotification("⚠️ BACKSTAB", ply.Name, 3)
+                end
+            end
+        end
+    end
+
+    if Trigger_Enabled then
+        local target = Mouse.Target
+        if target then
+            local char = target
+            while char and char ~= Workspace do
+                if char:IsA("Model") and Players:GetPlayerFromCharacter(char) then
+                    break
+                end
+                char = char.Parent
+            end
+            if char and char:IsA("Model") then
+                local plr = Players:GetPlayerFromCharacter(char)
+                if plr and plr ~= LocalPlayer and not IsTeammate(plr) then
+                    local hum = char:FindFirstChildOfClass("Humanoid")
+                    if hum and hum.Health > 0 then
+                        if tick() - lastTriggerTime >= CURRENT.Trigger_Delay then
+                            lastTriggerTime = tick()
+                            pcall(function()
+                                if type(mouse2click) == "function" then
+                                    mouse2click()
+                                else
+                                    if type(mouse2press) == "function" then mouse2press() end
+                                    if type(mouse2release) == "function" then mouse2release() end
+                                end
+                            end)
+                        end
+                    end
+                end
+            end
+        end
+    end
+end)
+
+game:BindToClose(SaveSettings)
+
+print("⭐ Knife Duels v5.1 — MOBILE + PC LOADED!")
+print("📱 Mobile: " .. tostring(IS_MOBILE))
+print("📱 UI Scale: " .. string.format("%.2f", UI_SCALE))
+print("🎨 23 Themes")
+print("⌨️ Keybinds customizable on PC • Toggle buttons on Mobile")
