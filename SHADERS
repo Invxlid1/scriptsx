@@ -1,0 +1,1812 @@
+-- ============================================================
+-- InvalidX Shaders v5.0 — RoShade Killer Edition
+-- Real weather · 3D/4D audio · Auto-preset on join · 14 presets
+-- ============================================================
+
+if _G.INVALIDX_SHADER_LOADED then
+    print("⚠️ Already loaded. Run InvalidX_Shader_Unload() first.")
+    return
+end
+_G.INVALIDX_SHADER_LOADED = true
+
+local Lighting          = game:GetService("Lighting")
+local TweenService      = game:GetService("TweenService")
+local UserInputService  = game:GetService("UserInputService")
+local CoreGui           = game:GetService("CoreGui")
+local RunService        = game:GetService("RunService")
+local HttpService       = game:GetService("HttpService")
+local SoundService      = game:GetService("SoundService")
+local MarketplaceService= game:GetService("MarketplaceService")
+local Players           = game:GetService("Players")
+local Terrain           = workspace.Terrain
+local Camera            = workspace.CurrentCamera
+local LocalPlayer       = Players.LocalPlayer
+
+-- ============================================================
+--  CONFIG
+-- ============================================================
+local CONFIG = {
+    Enabled             = true,
+    AutoPresetOnJoin    = true,
+    DisableMapLighting  = false,
+    MasterIntensity     = 1.0,
+    QualityTier         = "High",
+
+    -- Lighting
+    Ambient             = Color3.fromRGB(10,10,16),
+    OutdoorAmbient      = Color3.fromRGB(90,90,105),
+    Brightness          = 2.7,
+    ShadowSoftness      = 0.18,
+    EnvSpecularScale    = 0.95,
+    EnvDiffuseScale     = 0.7,
+    Exposure            = 0.18,
+    GlobalShadows       = true,
+
+    -- Atmosphere
+    AtmosEnabled        = true,
+    AtmosDensity        = 0.3,
+    AtmosHaze           = 1.4,
+    AtmosGlare          = 0.3,
+    AtmosColor          = Color3.fromRGB(200,178,168),
+    AtmosDecay          = Color3.fromRGB(58,48,42),
+    AtmosOffset         = 0.3,
+
+    -- Post FX
+    BloomEnabled        = true,
+    BloomIntensity      = 0.65,
+    BloomSize           = 20,
+    BloomThreshold      = 0.76,
+
+    CCEnabled           = true,
+    CCBrightness        = 0.02,
+    CCContrast          = 0.25,
+    CCSaturation        = 0.08,
+    CCTint              = Color3.fromRGB(255,250,240),
+
+    DOFEnabled          = true,
+    DOFFarIntensity     = 0.3,
+    DOFFocusDistance    = 34,
+    DOFInFocusRadius    = 20,
+
+    SunRaysEnabled      = true,
+    SunRaysIntensity    = 0.22,
+    SunRaysSpread       = 0.5,
+
+    BlurEnabled         = false,
+    BlurSize            = 1.2,
+
+    -- Sky/clouds
+    SkyEnabled          = false,
+    SkyID               = 1,
+    CloudsEnabled       = true,
+    CloudsCover         = 0.55,
+    CloudsDensity       = 0.45,
+
+    -- Materials
+    MaterialBoost       = false,
+    MaterialBoostAmount = 0.18,
+
+    -- Water
+    WaterEnabled        = true,
+    WaterReflectance    = 0.6,
+    WaterTransparency   = 0.25,
+    WaterWaveSize       = 0.35,
+    WaterWaveSpeed      = 4,
+
+    -- Weather (REAL — spawns particles + sounds)
+    WeatherMode         = "None",   -- None/Clear/Rain/Fog/Storm/Snow/Ash
+
+    -- Audio 3D/4D
+    AudioEnabled        = true,
+    AudioReverb         = "Default",-- Default/Outdoor/Hallway/Forest/City/Mountains/Room
+    AudioDistanceFactor = 3.33,
+    AudioDopplerScale   = 1.0,
+    AudioRolloffScale   = 1.0,
+    WeatherSounds       = true,
+
+    -- Time
+    DynamicTimeEnabled  = false,
+    DynamicTimeSpeed    = 900,
+    TimeBlendEnabled    = true,
+
+    -- Camera
+    FOVEnabled          = false,
+    FOVValue            = 70,
+}
+
+-- ============================================================
+--  STATE
+-- ============================================================
+local saved = {Lighting={}, Terrain={}, Sky=nil, Clouds=nil, Sound={}}
+local disabledMapEffects = {}
+local boostedParts = {}
+local effects = {}
+local weatherObjects = {}   -- spawned particles/sounds
+local audioObjects = {}
+local notifGui = nil
+local panicking = false
+local uiVisible = true
+
+local CONFIG_FILE = "InvalidX_Shaders_v5.json"
+local PRESETS_FILE = "InvalidX_Shaders_Slots_v5.json"
+
+-- ============================================================
+--  NOTIFICATIONS
+-- ============================================================
+local function notify(title, message, duration)
+    duration = duration or 3
+    if not notifGui then
+        notifGui = Instance.new("ScreenGui")
+        notifGui.Name = "InvalidX_ShaderNotif"
+        notifGui.ResetOnSpawn = false
+        notifGui.Parent = CoreGui
+        notifGui.DisplayOrder = 9999
+    end
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(0, 320, 0, 80)
+    frame.Position = UDim2.new(1, 20, 0, 25)
+    frame.BackgroundColor3 = Color3.fromRGB(12, 10, 20)
+    frame.BackgroundTransparency = 0.08
+    frame.BorderSizePixel = 0
+    frame.Parent = notifGui
+    Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 12)
+
+    local stroke = Instance.new("UIStroke", frame)
+    stroke.Thickness = 2
+    stroke.Color = Color3.fromRGB(180, 80, 255)
+
+    local t = Instance.new("TextLabel", frame)
+    t.Size = UDim2.new(1, -20, 0, 24)
+    t.Position = UDim2.new(0, 12, 0, 8)
+    t.BackgroundTransparency = 1
+    t.Font = Enum.Font.GothamBold
+    t.Text = "✨ " .. title
+    t.TextColor3 = Color3.fromRGB(255, 255, 255)
+    t.TextSize = 15
+    t.TextXAlignment = Enum.TextXAlignment.Left
+
+    local m = Instance.new("TextLabel", frame)
+    m.Size = UDim2.new(1, -20, 0, 34)
+    m.Position = UDim2.new(0, 12, 0, 36)
+    m.BackgroundTransparency = 1
+    m.Font = Enum.Font.Gotham
+    m.Text = message
+    m.TextColor3 = Color3.fromRGB(200, 200, 220)
+    m.TextSize = 12
+    m.TextWrapped = true
+    m.TextXAlignment = Enum.TextXAlignment.Left
+
+    TweenService:Create(frame, TweenInfo.new(0.3, Enum.EasingStyle.Back), {
+        Position = UDim2.new(1, -340, 0, 25)
+    }):Play()
+
+    task.delay(duration, function()
+        TweenService:Create(frame, TweenInfo.new(0.3, Enum.EasingStyle.Quad), {
+            Position = UDim2.new(1, 20, 0, 25)
+        }):Play()
+        task.wait(0.35)
+        frame:Destroy()
+    end)
+end
+
+-- ============================================================
+--  SAVE ORIGINALS
+-- ============================================================
+local function saveOriginals()
+    saved.Lighting = {
+        Ambient = Lighting.Ambient,
+        OutdoorAmbient = Lighting.OutdoorAmbient,
+        Brightness = Lighting.Brightness,
+        ShadowSoftness = Lighting.ShadowSoftness,
+        GlobalShadows = Lighting.GlobalShadows,
+        EnvironmentDiffuseScale = Lighting.EnvironmentDiffuseScale,
+        EnvironmentSpecularScale = Lighting.EnvironmentSpecularScale,
+        ExposureCompensation = Lighting.ExposureCompensation,
+        ClockTime = Lighting.ClockTime,
+        FogEnd = Lighting.FogEnd,
+        FogStart = Lighting.FogStart,
+        FogColor = Lighting.FogColor,
+    }
+    saved.Terrain = {
+        WaterReflectance = Terrain.WaterReflectance,
+        WaterTransparency = Terrain.WaterTransparency,
+        WaterWaveSize = Terrain.WaterWaveSize,
+        WaterWaveSpeed = Terrain.WaterWaveSpeed,
+    }
+    saved.Sound = {
+        AmbientReverb = SoundService.AmbientReverb,
+        DistanceFactor = SoundService.DistanceFactor,
+        DopplerScale = SoundService.DopplerScale,
+        RolloffScale = SoundService.RolloffScale,
+    }
+    local sky = Lighting:FindFirstChildOfClass("Sky")
+    if sky then saved.Sky = sky:Clone() end
+    local clouds = Lighting:FindFirstChildOfClass("Clouds")
+    if clouds then
+        saved.Clouds = {Cover = clouds.Cover, Density = clouds.Density, Color = clouds.Color}
+    end
+end
+
+local function tweenProp(inst, prop, target, dur, style)
+    if not inst then return end
+    local cur = inst[prop]
+    if typeof(cur) == "Color3" and typeof(target) == "Color3" then
+        if (cur.R-target.R)^2+(cur.G-target.G)^2+(cur.B-target.B)^2 < 0.0001 then return end
+    elseif typeof(cur) == "number" and typeof(target) == "number" then
+        if math.abs(cur-target) < 0.001 then return end
+    end
+    pcall(function()
+        TweenService:Create(inst, TweenInfo.new(dur or 0.6, style or Enum.EasingStyle.Quad), {[prop] = target}):Play()
+    end)
+end
+
+-- ============================================================
+--  DISABLE MAP LIGHTING
+-- ============================================================
+local function disableMapLighting()
+    disabledMapEffects = {}
+    for _, child in ipairs(Lighting:GetChildren()) do
+        if (child:IsA("PostEffect") or child:IsA("Atmosphere") or child:IsA("Sky") or child:IsA("Clouds"))
+            and not child.Name:match("^InvalidX_") then
+            table.insert(disabledMapEffects, {obj = child, wasEnabled = child.Enabled})
+            child.Enabled = false
+        end
+    end
+    notify("Map Lighting", "Disabled " .. #disabledMapEffects .. " map effects", 3)
+end
+
+local function restoreMapLighting()
+    for _, data in ipairs(disabledMapEffects) do
+        pcall(function() data.obj.Enabled = data.wasEnabled end)
+    end
+    disabledMapEffects = {}
+end
+
+-- ============================================================
+--  EFFECTS
+-- ============================================================
+local function ensureEffect(name, className)
+    if effects[name] and effects[name].Parent then return effects[name] end
+    local e = Instance.new(className)
+    e.Name = "InvalidX_" .. name
+    e.Parent = Lighting
+    effects[name] = e
+    return e
+end
+
+local function applyBloom()
+    if not CONFIG.BloomEnabled then
+        if effects.Bloom then effects.Bloom:Destroy(); effects.Bloom = nil end
+        return
+    end
+    local b = ensureEffect("Bloom", "BloomEffect")
+    local m = CONFIG.MasterIntensity
+    tweenProp(b, "Intensity", CONFIG.BloomIntensity * m, 0.5)
+    tweenProp(b, "Size", CONFIG.BloomSize, 0.5)
+    tweenProp(b, "Threshold", CONFIG.BloomThreshold, 0.5)
+end
+
+local function applyCC()
+    if not CONFIG.CCEnabled then
+        if effects.CC then effects.CC:Destroy(); effects.CC = nil end
+        return
+    end
+    local c = ensureEffect("CC", "ColorCorrectionEffect")
+    local m = CONFIG.MasterIntensity
+    tweenProp(c, "Brightness", CONFIG.CCBrightness * m, 0.5)
+    tweenProp(c, "Contrast", CONFIG.CCContrast * m, 0.5)
+    tweenProp(c, "Saturation", CONFIG.CCSaturation * m, 0.5)
+    tweenProp(c, "TintColor", CONFIG.CCTint, 0.7)
+end
+
+local function applyDOF()
+    if not CONFIG.DOFEnabled then
+        if effects.DOF then effects.DOF:Destroy(); effects.DOF = nil end
+        return
+    end
+    local d = ensureEffect("DOF", "DepthOfFieldEffect")
+    local m = CONFIG.MasterIntensity
+    tweenProp(d, "FarIntensity", CONFIG.DOFFarIntensity * m, 0.5)
+    tweenProp(d, "FocusDistance", CONFIG.DOFFocusDistance, 0.5)
+    tweenProp(d, "InFocusRadius", CONFIG.DOFInFocusRadius, 0.5)
+    tweenProp(d, "NearIntensity", 0, 0.5)
+end
+
+local function applySunRays()
+    if not CONFIG.SunRaysEnabled then
+        if effects.SunRays then effects.SunRays:Destroy(); effects.SunRays = nil end
+        return
+    end
+    local s = ensureEffect("SunRays", "SunRaysEffect")
+    local m = CONFIG.MasterIntensity
+    tweenProp(s, "Intensity", CONFIG.SunRaysIntensity * m, 0.5)
+    tweenProp(s, "Spread", CONFIG.SunRaysSpread, 0.5)
+end
+
+local function applyBlur()
+    if not CONFIG.BlurEnabled then
+        if effects.Blur then effects.Blur:Destroy(); effects.Blur = nil end
+        return
+    end
+    local b = ensureEffect("Blur", "BlurEffect")
+    tweenProp(b, "Size", CONFIG.BlurSize, 0.4)
+end
+
+local function applyAtmosphere()
+    if not CONFIG.AtmosEnabled then
+        if effects.Atmo then
+            tweenProp(effects.Atmo, "Density", 0, 0.5)
+            task.delay(0.6, function()
+                if effects.Atmo then effects.Atmo:Destroy(); effects.Atmo = nil end
+            end)
+        end
+        return
+    end
+    local a = ensureEffect("Atmo", "Atmosphere")
+    tweenProp(a, "Density", CONFIG.AtmosDensity, 0.7)
+    tweenProp(a, "Haze", CONFIG.AtmosHaze, 0.7)
+    tweenProp(a, "Glare", CONFIG.AtmosGlare, 0.7)
+    tweenProp(a, "Color", CONFIG.AtmosColor, 0.7)
+    tweenProp(a, "Decay", CONFIG.AtmosDecay, 0.7)
+    tweenProp(a, "Offset", CONFIG.AtmosOffset, 0.7)
+end
+
+local function applyLighting()
+    tweenProp(Lighting, "Ambient", CONFIG.Ambient, 0.7)
+    tweenProp(Lighting, "OutdoorAmbient", CONFIG.OutdoorAmbient, 0.7)
+    tweenProp(Lighting, "Brightness", CONFIG.Brightness, 0.7)
+    tweenProp(Lighting, "ShadowSoftness", CONFIG.ShadowSoftness, 0.7)
+    tweenProp(Lighting, "EnvironmentSpecularScale", CONFIG.EnvSpecularScale, 0.9)
+    tweenProp(Lighting, "EnvironmentDiffuseScale", CONFIG.EnvDiffuseScale, 0.9)
+    tweenProp(Lighting, "ExposureCompensation", CONFIG.Exposure, 0.7)
+    Lighting.GlobalShadows = CONFIG.GlobalShadows
+end
+
+local function applyWater()
+    if not CONFIG.WaterEnabled then return end
+    pcall(function()
+        tweenProp(Terrain, "WaterReflectance", CONFIG.WaterReflectance, 0.7)
+        tweenProp(Terrain, "WaterTransparency", CONFIG.WaterTransparency, 0.7)
+        tweenProp(Terrain, "WaterWaveSize", CONFIG.WaterWaveSize, 0.7)
+        tweenProp(Terrain, "WaterWaveSpeed", CONFIG.WaterWaveSpeed, 0.7)
+    end)
+end
+
+local SKIES = {
+    [1] = {Bk="rbxassetid://4702479942",Dn="rbxassetid://4702479573",Ft="rbxassetid://4702479866",Lf="rbxassetid://4702479648",Rt="rbxassetid://4702479787",Up="rbxassetid://4702479460"},
+    [2] = {Bk="rbxassetid://404468639",Dn="rbxassetid://404468709",Ft="rbxassetid://404468639",Lf="rbxassetid://404468709",Rt="rbxassetid://404468639",Up="rbxassetid://404468709"},
+    [3] = {Bk="rbxassetid://159454299",Dn="rbxassetid://159454296",Ft="rbxassetid://159454293",Lf="rbxassetid://159454286",Rt="rbxassetid://159454300",Up="rbxassetid://159454288"},
+    [4] = {Bk="rbxassetid://570557024",Dn="rbxassetid://570557024",Ft="rbxassetid://570557024",Lf="rbxassetid://570557024",Rt="rbxassetid://570557024",Up="rbxassetid://570557024"},
+    [5] = {Bk="rbxassetid://2659543086",Dn="rbxassetid://2659543068",Ft="rbxassetid://2659543086",Lf="rbxassetid://2659543068",Rt="rbxassetid://2659543086",Up="rbxassetid://2659543068"},
+}
+
+local function applySky()
+    local existing = Lighting:FindFirstChildOfClass("Sky")
+    if not CONFIG.SkyEnabled then
+        if existing and existing.Name == "InvalidX_Sky" then
+            existing:Destroy()
+            if saved.Sky then saved.Sky:Clone().Parent = Lighting end
+        end
+        return
+    end
+    if existing and existing.Name == "InvalidX_Sky" then existing:Destroy() end
+    local s = Instance.new("Sky")
+    s.Name = "InvalidX_Sky"
+    local preset = SKIES[CONFIG.SkyID] or SKIES[1]
+    s.SkyboxBk = preset.Bk; s.SkyboxDn = preset.Dn; s.SkyboxFt = preset.Ft
+    s.SkyboxLf = preset.Lf; s.SkyboxRt = preset.Rt; s.SkyboxUp = preset.Up
+    s.SunAngularSize = 22; s.MoonAngularSize = 12; s.StarCount = 5000
+    s.Parent = Lighting
+end
+
+local function applyClouds()
+    local clouds = Lighting:FindFirstChildOfClass("Clouds")
+    if not clouds then
+        clouds = Instance.new("Clouds")
+        clouds.Parent = Lighting
+    end
+    if CONFIG.CloudsEnabled then
+        tweenProp(clouds, "Cover", CONFIG.CloudsCover, 1.2)
+        tweenProp(clouds, "Density", CONFIG.CloudsDensity, 1.2)
+    else
+        tweenProp(clouds, "Cover", 0, 1.0)
+    end
+end
+
+-- ============================================================
+--  REAL WEATHER SYSTEM (particles + sound)
+-- ============================================================
+local function clearWeatherObjects()
+    for _, obj in ipairs(weatherObjects) do
+        pcall(function() obj:Destroy() end)
+    end
+    weatherObjects = {}
+end
+
+local function makeWeatherPart()
+    local part = Instance.new("Part")
+    part.Size = Vector3.new(160, 1, 160)
+    part.Transparency = 1
+    part.Anchored = true
+    part.CanCollide = false
+    part.CanQuery = false
+    part.CanTouch = false
+    part.CastShadow = false
+    part.Parent = workspace
+    return part
+end
+
+local function followPlayer(part)
+    -- constantly keep part above player
+    local conn
+    conn = RunService.Heartbeat:Connect(function()
+        if not part or not part.Parent then
+            if conn then conn:Disconnect() end
+            return
+        end
+        local char = LocalPlayer.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            part.CFrame = CFrame.new(hrp.Position + Vector3.new(0, 40, 0))
+        end
+    end)
+    table.insert(weatherObjects, conn)  -- cleanup on change
+    return conn
+end
+
+local function makeSound3D(id, volume, looped, attachedTo)
+    local sound = Instance.new("Sound")
+    sound.SoundId = id
+    sound.Volume = volume or 0.5
+    sound.Looped = looped ~= false
+    sound.PlayOnRemove = false
+    if attachedTo then
+        sound.Parent = attachedTo
+    else
+        sound.Parent = SoundService
+    end
+    sound:Play()
+    return sound
+end
+
+-- SOUND IDs (free Roblox library)
+local SOUNDS = {
+    Rain       = "rbxassetid://9045881886",   -- rain loop
+    Thunder    = "rbxassetid://5153791546",   -- thunder crack
+    Wind       = "rbxassetid://9125405058",   -- wind whoosh
+    Snow       = "rbxassetid://9125407882",   -- soft snow ambience
+    Fire       = "rbxassetid://5154276915",   -- fire crackle
+    Ocean      = "rbxassetid://9045881621",   -- waves
+}
+
+local function applyWeather()
+    clearWeatherObjects()
+    local mode = CONFIG.WeatherMode
+
+    if mode == "None" or mode == "Clear" then
+        if mode == "Clear" and effects.Atmo then
+            tweenProp(effects.Atmo, "Density", CONFIG.AtmosDensity, 1.5)
+            tweenProp(effects.Atmo, "Haze", 0.5, 1.5)
+        end
+        return
+    end
+
+    if mode == "Rain" then
+        -- Atmosphere change
+        if effects.Atmo then
+            tweenProp(effects.Atmo, "Density", 0.55, 1.5)
+            tweenProp(effects.Atmo, "Haze", 3.5, 1.5)
+            tweenProp(effects.Atmo, "Color", Color3.fromRGB(120, 130, 145), 1.5)
+            tweenProp(effects.Atmo, "Decay", Color3.fromRGB(60, 65, 75), 1.5)
+        end
+        if effects.CC then
+            tweenProp(effects.CC, "Brightness", -0.05, 1.5)
+            tweenProp(effects.CC, "Saturation", -0.15, 1.5)
+        end
+
+        -- Rain particles
+        local part = makeWeatherPart()
+        local emitter = Instance.new("ParticleEmitter")
+        emitter.Texture = "rbxassetid://241876428"  -- rain streak
+        emitter.Rate = 800
+        emitter.Lifetime = NumberRange.new(0.7, 1.1)
+        emitter.Speed = NumberRange.new(90, 130)
+        emitter.SpreadAngle = Vector2.new(0, 0)
+        emitter.Rotation = NumberRange.new(180, 180)
+        emitter.RotSpeed = NumberRange.new(0, 0)
+        emitter.Size = NumberSequence.new({
+            NumberSequenceKeypoint.new(0, 0.15),
+            NumberSequenceKeypoint.new(1, 0.15),
+        })
+        emitter.Transparency = NumberSequence.new({
+            NumberSequenceKeypoint.new(0, 0.2),
+            NumberSequenceKeypoint.new(1, 0.6),
+        })
+        emitter.LightEmission = 0.3
+        emitter.Color = ColorSequence.new(Color3.fromRGB(180, 200, 230))
+        emitter.Parent = part
+        table.insert(weatherObjects, part)
+        followPlayer(part)
+
+        -- Rain sound (3D at player)
+        if CONFIG.WeatherSounds then
+            local char = LocalPlayer.Character
+            local hrp = char and char:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                local s = makeSound3D(SOUNDS.Rain, 0.6, true, hrp)
+                table.insert(weatherObjects, s)
+            end
+        end
+    elseif mode == "Snow" then
+        if effects.Atmo then
+            tweenProp(effects.Atmo, "Density", 0.42, 1.5)
+            tweenProp(effects.Atmo, "Haze", 2, 1.5)
+            tweenProp(effects.Atmo, "Color", Color3.fromRGB(230, 240, 255), 1.5)
+        end
+
+        local part = makeWeatherPart()
+        local emitter = Instance.new("ParticleEmitter")
+        emitter.Texture = "rbxassetid://241876427"  -- snowflake
+        emitter.Rate = 300
+        emitter.Lifetime = NumberRange.new(2, 4)
+        emitter.Speed = NumberRange.new(6, 12)
+        emitter.SpreadAngle = Vector2.new(0, 0)
+        emitter.Rotation = NumberRange.new(0, 360)
+        emitter.RotSpeed = NumberRange.new(-30, 30)
+        emitter.Size = NumberSequence.new({
+            NumberSequenceKeypoint.new(0, 0.3),
+            NumberSequenceKeypoint.new(0.5, 0.4),
+            NumberSequenceKeypoint.new(1, 0.2),
+        })
+        emitter.Transparency = NumberSequence.new({
+            NumberSequenceKeypoint.new(0, 0.1),
+            NumberSequenceKeypoint.new(1, 0.8),
+        })
+        emitter.LightEmission = 0.5
+        emitter.Color = ColorSequence.new(Color3.fromRGB(255, 255, 255))
+        emitter.Parent = part
+        table.insert(weatherObjects, part)
+        followPlayer(part)
+
+        if CONFIG.WeatherSounds then
+            local char = LocalPlayer.Character
+            local hrp = char and char:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                local s = makeSound3D(SOUNDS.Snow, 0.4, true, hrp)
+                table.insert(weatherObjects, s)
+            end
+        end
+    elseif mode == "Fog" then
+        if effects.Atmo then
+            tweenProp(effects.Atmo, "Density", 0.7, 2)
+            tweenProp(effects.Atmo, "Haze", 6, 2)
+            tweenProp(effects.Atmo, "Color", Color3.fromRGB(180, 180, 190), 2)
+        end
+        if not effects.Fog then
+            effects.Fog = Instance.new("ColorCorrectionEffect")
+            effects.Fog.Name = "InvalidX_FogOverlay"
+            effects.Fog.Brightness = -0.05
+            effects.Fog.Contrast = -0.15
+            effects.Fog.Saturation = -0.2
+            effects.Fog.TintColor = Color3.fromRGB(220, 220, 230)
+            effects.Fog.Parent = Lighting
+        end
+    elseif mode == "Storm" then
+        if effects.Atmo then
+            tweenProp(effects.Atmo, "Density", 0.65, 1.5)
+            tweenProp(effects.Atmo, "Haze", 4.5, 1.5)
+            tweenProp(effects.Atmo, "Color", Color3.fromRGB(60, 65, 80), 1.5)
+            tweenProp(effects.Atmo, "Decay", Color3.fromRGB(30, 35, 45), 1.5)
+        end
+        if effects.CC then
+            tweenProp(effects.CC, "Brightness", -0.15, 1.5)
+            tweenProp(effects.CC, "Saturation", -0.3, 1.5)
+        end
+
+        local part = makeWeatherPart()
+        local emitter = Instance.new("ParticleEmitter")
+        emitter.Texture = "rbxassetid://241876428"
+        emitter.Rate = 1500
+        emitter.Lifetime = NumberRange.new(0.5, 0.9)
+        emitter.Speed = NumberRange.new(140, 180)
+        emitter.SpreadAngle = Vector2.new(-15, 15)  -- diagonal
+        emitter.Rotation = NumberRange.new(200, 220)
+        emitter.Size = NumberSequence.new(0.12)
+        emitter.Transparency = NumberSequence.new({
+            NumberSequenceKeypoint.new(0, 0.1),
+            NumberSequenceKeypoint.new(1, 0.7),
+        })
+        emitter.Color = ColorSequence.new(Color3.fromRGB(180, 200, 220))
+        emitter.Parent = part
+        table.insert(weatherObjects, part)
+        followPlayer(part)
+
+        -- Storm sounds + random thunder
+        if CONFIG.WeatherSounds then
+            local char = LocalPlayer.Character
+            local hrp = char and char:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                local rain = makeSound3D(SOUNDS.Rain, 0.85, true, hrp)
+                table.insert(weatherObjects, rain)
+
+                -- Random thunder loop
+                local thunderConn
+                thunderConn = task.spawn(function()
+                    while CONFIG.WeatherMode == "Storm" and _G.INVALIDX_SHADER_LOADED do
+                        task.wait(math.random(6, 14))
+                        if CONFIG.WeatherMode ~= "Storm" then break end
+                        local thunderSound = makeSound3D(SOUNDS.Thunder, 0.7, false, workspace)
+                        table.insert(weatherObjects, thunderSound)
+                        task.wait(4)
+                    end
+                end)
+                table.insert(weatherObjects, {Destroy = function() pcall(function() task.cancel(thunderConn) end) end})
+            end
+        end
+    elseif mode == "Ash" then
+        if effects.Atmo then
+            tweenProp(effects.Atmo, "Density", 0.5, 1.5)
+            tweenProp(effects.Atmo, "Haze", 3, 1.5)
+            tweenProp(effects.Atmo, "Color", Color3.fromRGB(100, 90, 85), 1.5)
+        end
+        local part = makeWeatherPart()
+        local emitter = Instance.new("ParticleEmitter")
+        emitter.Texture = "rbxassetid://241876427"
+        emitter.Rate = 60
+        emitter.Lifetime = NumberRange.new(3, 6)
+        emitter.Speed = NumberRange.new(3, 8)
+        emitter.SpreadAngle = Vector2.new(0, 0)
+        emitter.Size = NumberSequence.new(0.3)
+        emitter.Transparency = NumberSequence.new({
+            NumberSequenceKeypoint.new(0, 0.3),
+            NumberSequenceKeypoint.new(1, 0.9),
+        })
+        emitter.Color = ColorSequence.new(Color3.fromRGB(60, 55, 50))
+        emitter.Parent = part
+        table.insert(weatherObjects, part)
+        followPlayer(part)
+    end
+end
+
+-- ============================================================
+--  3D / 4D AUDIO SYSTEM
+-- ============================================================
+local function applyAudio()
+    if not CONFIG.AudioEnabled then
+        SoundService.AmbientReverb = saved.Sound.AmbientReverb
+        SoundService.DistanceFactor = saved.Sound.DistanceFactor
+        SoundService.DopplerScale = saved.Sound.DopplerScale
+        SoundService.RolloffScale = saved.Sound.RolloffScale
+        return
+    end
+    local reverbMap = {
+        Default = Enum.ReverbType.NoReverb,
+        Outdoor = Enum.ReverbType.Outdoor,
+        Hallway = Enum.ReverbType.Hallway,
+        Forest = Enum.ReverbType.Forest,
+        City = Enum.ReverbType.City,
+        Mountains = Enum.ReverbType.Mountains,
+        Room = Enum.ReverbType.Room,
+        Cave = Enum.ReverbType.StoneCorridor,
+    }
+    pcall(function()
+        SoundService.AmbientReverb = reverbMap[CONFIG.AudioReverb] or Enum.ReverbType.NoReverb
+    end)
+    pcall(function() SoundService.DistanceFactor = CONFIG.AudioDistanceFactor end)
+    pcall(function() SoundService.DopplerScale = CONFIG.AudioDopplerScale end)
+    pcall(function() SoundService.RolloffScale = CONFIG.AudioRolloffScale end)
+end
+
+-- ============================================================
+--  MASTER APPLY
+-- ============================================================
+local function applyAll()
+    if not CONFIG.Enabled then return end
+    applyBloom()
+    applyCC()
+    applyDOF()
+    applySunRays()
+    applyBlur()
+    applyAtmosphere()
+    applyLighting()
+    applyWater()
+    applySky()
+    applyClouds()
+    applyAudio()
+    if CONFIG.FOVEnabled then Camera.FieldOfView = CONFIG.FOVValue end
+end
+
+-- ============================================================
+--  PRESETS — 14 named, cinema-tier
+-- ============================================================
+local BUILTIN = {
+    ["Ultra Realistic"] = {
+        BloomIntensity=0.6,BloomSize=20,BloomThreshold=0.78,
+        CCBrightness=0.02,CCContrast=0.28,CCSaturation=0.05,
+        DOFFarIntensity=0.3,DOFFocusDistance=34,DOFInFocusRadius=20,
+        SunRaysIntensity=0.2,AtmosDensity=0.3,AtmosHaze=1.4,
+        Brightness=2.7,EnvSpecularScale=0.95,EnvDiffuseScale=0.75,
+    },
+    ["Hollywood"] = {
+        BloomIntensity=0.85,BloomSize=28,BloomThreshold=0.7,
+        CCBrightness=0.02,CCContrast=0.42,CCSaturation=-0.08,
+        CCTint=Color3.fromRGB(255,225,190),
+        DOFFarIntensity=0.5,DOFFocusDistance=26,DOFInFocusRadius=13,
+        SunRaysIntensity=0.35,AtmosDensity=0.42,AtmosHaze=2.2,
+        Brightness=2.2,EnvSpecularScale=0.95,EnvDiffuseScale=0.72,
+    },
+    ["Vibrant"] = {
+        BloomIntensity=0.35,BloomSize=12,BloomThreshold=0.9,
+        CCBrightness=0.14,CCContrast=0.34,CCSaturation=0.4,
+        DOFFarIntensity=0.18,DOFFocusDistance=42,
+        SunRaysIntensity=0.14,AtmosDensity=0.2,AtmosHaze=0.6,
+        Brightness=3.0,EnvSpecularScale=0.75,EnvDiffuseScale=0.55,
+    },
+    ["Film Noir"] = {
+        BloomIntensity=0.4,BloomSize=18,BloomThreshold=0.85,
+        CCBrightness=-0.08,CCContrast=0.72,CCSaturation=-1.0,
+        CCTint=Color3.fromRGB(230,230,240),
+        DOFFarIntensity=0.45,DOFFocusDistance=30,
+        SunRaysIntensity=0.08,AtmosDensity=0.38,AtmosHaze=2.2,
+        Brightness=1.95,EnvSpecularScale=0.9,EnvDiffuseScale=0.65,
+    },
+    ["Dreamscape"] = {
+        BloomIntensity=1.0,BloomSize=32,BloomThreshold=0.68,
+        CCBrightness=0.12,CCContrast=-0.08,CCSaturation=0.1,
+        CCTint=Color3.fromRGB(255,235,245),
+        DOFFarIntensity=0.35,DOFFocusDistance=24,
+        SunRaysIntensity=0.28,AtmosDensity=0.44,AtmosHaze=2,
+        Brightness=2.7,EnvSpecularScale=0.7,EnvDiffuseScale=0.55,
+    },
+    ["Neon City"] = {
+        BloomIntensity=1.05,BloomSize=38,BloomThreshold=0.42,
+        CCBrightness=0.05,CCContrast=0.55,CCSaturation=0.6,
+        CCTint=Color3.fromRGB(220,180,255),
+        DOFFarIntensity=0.32,DOFFocusDistance=28,
+        SunRaysIntensity=0.3,AtmosDensity=0.28,AtmosHaze=1,
+        Brightness=2.3,EnvSpecularScale=0.98,EnvDiffuseScale=0.35,
+    },
+    ["Golden Hour"] = {
+        BloomIntensity=0.9,BloomSize=26,BloomThreshold=0.72,
+        CCBrightness=0.05,CCContrast=0.3,CCSaturation=0.18,
+        CCTint=Color3.fromRGB(255,215,165),
+        DOFFarIntensity=0.38,DOFFocusDistance=28,
+        SunRaysIntensity=0.4,AtmosDensity=0.42,AtmosHaze=2.6,
+        AtmosColor=Color3.fromRGB(245,170,110),
+        AtmosDecay=Color3.fromRGB(120,70,45),
+        Brightness=2.4,EnvSpecularScale=0.95,EnvDiffuseScale=0.78,
+        ClockTime=17.5,
+    },
+    ["Moonlit"] = {
+        BloomIntensity=0.55,BloomSize=22,BloomThreshold=0.7,
+        CCBrightness=-0.04,CCContrast=0.32,CCSaturation=-0.15,
+        CCTint=Color3.fromRGB(180,205,255),
+        DOFFarIntensity=0.35,DOFFocusDistance=30,
+        SunRaysIntensity=0.1,AtmosDensity=0.4,AtmosHaze=1.5,
+        AtmosColor=Color3.fromRGB(120,150,200),
+        Brightness=1.7,EnvSpecularScale=0.9,EnvDiffuseScale=0.6,
+        ClockTime=0,
+    },
+    ["Anime"] = {
+        BloomIntensity=1.1,BloomSize=34,BloomThreshold=0.55,
+        CCBrightness=0.15,CCContrast=0.35,CCSaturation=0.55,
+        CCTint=Color3.fromRGB(255,240,250),
+        DOFFarIntensity=0.25,DOFFocusDistance=40,
+        SunRaysIntensity=0.35,AtmosDensity=0.2,AtmosHaze=0.7,
+        Brightness=3.0,EnvSpecularScale=0.8,EnvDiffuseScale=0.5,
+    },
+    ["Horror"] = {
+        BloomIntensity=0.3,BloomSize=22,BloomThreshold=0.65,
+        CCBrightness=-0.2,CCContrast=0.6,CCSaturation=-0.55,
+        CCTint=Color3.fromRGB(160,170,180),
+        DOFFarIntensity=0.5,DOFFocusDistance=20,DOFInFocusRadius=10,
+        SunRaysIntensity=0.05,AtmosDensity=0.6,AtmosHaze=4,
+        AtmosColor=Color3.fromRGB(60,60,70),
+        Brightness=1.4,EnvSpecularScale=0.65,EnvDiffuseScale=0.5,
+    },
+    ["Arctic"] = {
+        BloomIntensity=0.55,BloomSize=22,BloomThreshold=0.78,
+        CCBrightness=0.06,CCContrast=0.28,CCSaturation=-0.1,
+        CCTint=Color3.fromRGB(200,225,255),
+        DOFFarIntensity=0.3,DOFFocusDistance=32,
+        SunRaysIntensity=0.22,AtmosDensity=0.4,AtmosHaze=2.5,
+        AtmosColor=Color3.fromRGB(200,220,245),
+        Brightness=2.6,EnvSpecularScale=1.0,EnvDiffuseScale=0.8,
+    },
+    ["Desert"] = {
+        BloomIntensity=0.55,BloomSize=18,BloomThreshold=0.8,
+        CCBrightness=0.08,CCContrast=0.25,CCSaturation=0.12,
+        CCTint=Color3.fromRGB(255,225,180),
+        DOFFarIntensity=0.28,DOFFocusDistance=34,
+        SunRaysIntensity=0.28,AtmosDensity=0.35,AtmosHaze=2.8,
+        AtmosColor=Color3.fromRGB(235,190,145),
+        Brightness=2.9,EnvSpecularScale=0.85,EnvDiffuseScale=0.7,
+    },
+    ["Retro VHS"] = {
+        BloomIntensity=0.8,BloomSize=26,BloomThreshold=0.6,
+        CCBrightness=0.02,CCContrast=0.45,CCSaturation=0.35,
+        CCTint=Color3.fromRGB(255,210,180),
+        DOFFarIntensity=0.35,DOFFocusDistance=26,
+        SunRaysIntensity=0.2,AtmosDensity=0.3,AtmosHaze=1.8,
+        Brightness=2.3,EnvSpecularScale=0.7,EnvDiffuseScale=0.5,
+    },
+    ["Cinematic Teal"] = {
+        BloomIntensity=0.75,BloomSize=26,BloomThreshold=0.72,
+        CCBrightness=0.0,CCContrast=0.4,CCSaturation=-0.05,
+        CCTint=Color3.fromRGB(200,220,240),
+        DOFFarIntensity=0.48,DOFFocusDistance=26,DOFInFocusRadius=14,
+        SunRaysIntensity=0.28,AtmosDensity=0.38,AtmosHaze=2,
+        Brightness=2.2,EnvSpecularScale=0.9,EnvDiffuseScale=0.72,
+    },
+}
+
+local function applyBuiltin(name, silent)
+    local p = BUILTIN[name]
+    if not p then return end
+    for k, v in pairs(p) do CONFIG[k] = v end
+    applyAll()
+    if CONFIG.WeatherMode ~= "None" then applyWeather() end
+    if not silent then notify("Preset Applied", name, 1.8) end
+end
+
+local function saveSlot(slot)
+    if typeof(writefile) ~= "function" then return end
+    local all = {}
+    if typeof(isfile) == "function" and isfile(PRESETS_FILE) then
+        local ok, data = pcall(readfile, PRESETS_FILE)
+        if ok and #data > 0 then
+            local ok2, dec = pcall(function() return HttpService:JSONDecode(data) end)
+            if ok2 and typeof(dec) == "table" then all = dec end
+        end
+    end
+    local snap = {}
+    for k, v in pairs(CONFIG) do
+        if typeof(v) == "Color3" then
+            snap[k] = {__c = true, r = v.R, g = v.G, b = v.B}
+        else snap[k] = v end
+    end
+    all[tostring(slot)] = snap
+    pcall(function() writefile(PRESETS_FILE, HttpService:JSONEncode(all)) end)
+    notify("Saved", "Slot " .. slot, 1.5)
+end
+
+local function loadSlot(slot)
+    if typeof(isfile) ~= "function" or not isfile(PRESETS_FILE) then
+        notify("Empty", "Slot " .. slot, 1.5); return
+    end
+    local ok, data = pcall(readfile, PRESETS_FILE)
+    if not ok or #data == 0 then return end
+    local ok2, dec = pcall(function() return HttpService:JSONDecode(data) end)
+    if not ok2 or typeof(dec) ~= "table" then return end
+    local snap = dec[tostring(slot)]
+    if not snap then notify("Empty", "Slot " .. slot, 1.5); return end
+    for k, v in pairs(snap) do
+        if typeof(v) == "table" and v.__c then
+            CONFIG[k] = Color3.new(v.r, v.g, v.b)
+        else CONFIG[k] = v end
+    end
+    applyAll()
+    if CONFIG.WeatherMode ~= "None" then applyWeather() end
+    notify("Loaded", "Slot " .. slot, 1.5)
+end
+
+-- ============================================================
+--  GAME-BASED PRESET PICKER
+-- ============================================================
+local GAME_PRESET_MAP = {
+    [2753915549] = "Anime",           -- Blox Fruits
+    [4442272183] = "Anime",           -- Blox Fruits alt
+    [920587237] = "Vibrant",          -- Adopt Me
+    [606849621] = "Ultra Realistic",  -- Jailbreak
+    [142823291] = "Vibrant",          -- Murder Mystery 2
+    [142823291] = "Vibrant",
+    [2788229376] = "Ultra Realistic", -- Da Hood
+    [2107000341] = "Golden Hour",     -- ERLC
+    [2444015983] = "Ultra Realistic", -- Natural Disaster
+    [66654135] = "Vibrant",           -- Work at Pizza Place
+    [5342612144] = "Moonlit",         -- Doors (night)
+    [2262440989] = "Cinematic Teal",  -- Arsenal
+    [72829404259389] = "Vibrant",     -- Grow a Garden
+    [383310974] = "Vibrant",          -- Epic Minigames
+}
+
+local function analyzeGame()
+    -- 1. Check PlaceId lookup
+    local preset = GAME_PRESET_MAP[game.PlaceId]
+    if preset then return preset, "PlaceId match" end
+
+    -- 2. Check by name
+    local ok, info = pcall(function()
+        return MarketplaceService:GetProductInfo(game.PlaceId)
+    end)
+    if ok and info and info.Name then
+        local n = info.Name:lower()
+        if n:find("anime") or n:find("fruit") or n:find("naruto") or n:find("dragon ball") then
+            return "Anime", "Name match: anime"
+        elseif n:find("horror") or n:find("scary") or n:find("fnaf") then
+            return "Horror", "Name match: horror"
+        elseif n:find("snow") or n:find("winter") or n:find("ice") then
+            return "Arctic", "Name match: arctic"
+        elseif n:find("desert") or n:find("sand") then
+            return "Desert", "Name match: desert"
+        elseif n:find("neon") or n:find("cyber") or n:find("city") then
+            return "Neon City", "Name match: neon"
+        elseif n:find("retro") or n:find("80s") or n:find("vhs") then
+            return "Retro VHS", "Name match: retro"
+        elseif n:find("mansion") or n:find("haunted") then
+            return "Horror", "Name match: horror"
+        end
+    end
+
+    -- 3. Analyze Lighting environment
+    local hour = Lighting.ClockTime
+    local hasAtmos = Lighting:FindFirstChildOfClass("Atmosphere") ~= nil
+    local ambientBrightness = Lighting.Brightness
+
+    if hour >= 20 or hour <= 5 then
+        return "Moonlit", "Time: night"
+    elseif hour >= 16 and hour <= 19 then
+        return "Golden Hour", "Time: sunset"
+    end
+
+    if ambientBrightness < 1 then
+        return "Ultra Realistic", "Dark game detected"
+    elseif ambientBrightness > 3 then
+        return "Vibrant", "Bright game detected"
+    end
+
+    return "Ultra Realistic", "Default"
+end
+
+local function autoApplyGamePreset()
+    local preset, reason = analyzeGame()
+    if preset then
+        applyBuiltin(preset, true)
+        notify("Auto-Preset", preset .. " (" .. reason .. ")", 4)
+    end
+end
+
+-- ============================================================
+--  CONFIG SAVE/LOAD
+-- ============================================================
+local function saveConfig()
+    if typeof(writefile) ~= "function" then return end
+    local toSave = {}
+    for k, v in pairs(CONFIG) do
+        if typeof(v) == "Color3" then
+            toSave[k] = {__c = true, r = v.R, g = v.G, b = v.B}
+        else toSave[k] = v end
+    end
+    pcall(function() writefile(CONFIG_FILE, HttpService:JSONEncode(toSave)) end)
+    notify("Saved", "Config saved", 1.5)
+end
+
+local function loadConfig()
+    if typeof(isfile) ~= "function" or not isfile(CONFIG_FILE) then return end
+    local ok, data = pcall(readfile, CONFIG_FILE)
+    if not ok or #data == 0 then return end
+    local ok2, dec = pcall(function() return HttpService:JSONDecode(data) end)
+    if not ok2 or typeof(dec) ~= "table" then return end
+    for k, v in pairs(dec) do
+        if typeof(v) == "table" and v.__c then
+            CONFIG[k] = Color3.new(v.r, v.g, v.b)
+        else CONFIG[k] = v end
+    end
+end
+
+-- ============================================================
+--  TIME-OF-DAY BLENDING
+-- ============================================================
+local KEYFRAMES = {
+    {0,   0.55, 0.6, 0.15, Color3.fromRGB(20,25,45),   Color3.fromRGB(15,18,35),   Color3.fromRGB(10,12,22),  Color3.fromRGB(60,70,95),    1.2, Color3.fromRGB(160,180,220)},
+    {6,   0.44, 2.4, 0.5,  Color3.fromRGB(240,160,100),Color3.fromRGB(120,70,50),  Color3.fromRGB(26,22,30),  Color3.fromRGB(140,120,115), 2.0, Color3.fromRGB(255,210,180)},
+    {9,   0.28, 0.9, 0.3,  Color3.fromRGB(210,200,190),Color3.fromRGB(80,75,70),   Color3.fromRGB(20,20,28),  Color3.fromRGB(115,115,125), 2.6, Color3.fromRGB(255,250,240)},
+    {12,  0.18, 0.5, 0.2,  Color3.fromRGB(200,210,220),Color3.fromRGB(60,65,75),   Color3.fromRGB(18,18,24),  Color3.fromRGB(105,105,115), 2.8, Color3.fromRGB(255,255,250)},
+    {15,  0.25, 0.8, 0.25, Color3.fromRGB(210,200,180),Color3.fromRGB(85,75,65),   Color3.fromRGB(20,20,28),  Color3.fromRGB(115,115,125), 2.6, Color3.fromRGB(255,250,235)},
+    {18,  0.42, 2.6, 0.55, Color3.fromRGB(255,140,90), Color3.fromRGB(140,70,50),  Color3.fromRGB(28,20,28),  Color3.fromRGB(150,105,100), 2.0, Color3.fromRGB(255,195,160)},
+    {20,  0.5, 1.4, 0.3,   Color3.fromRGB(110,80,100), Color3.fromRGB(70,45,65),   Color3.fromRGB(22,18,28),  Color3.fromRGB(110,95,115),  1.7, Color3.fromRGB(230,190,200)},
+    {24,  0.55, 0.6, 0.15, Color3.fromRGB(20,25,45),   Color3.fromRGB(15,18,35),   Color3.fromRGB(10,12,22),  Color3.fromRGB(60,70,95),    1.2, Color3.fromRGB(160,180,220)},
+}
+
+local function lerpC(a,b,t) return Color3.new(a.R+(b.R-a.R)*t,a.G+(b.G-a.G)*t,a.B+(b.B-a.B)*t) end
+local function lerpN(a,b,t) return a+(b-a)*t end
+
+local function getBlend(hour)
+    hour = hour % 24
+    local before, after
+    for i = 1, #KEYFRAMES - 1 do
+        if hour >= KEYFRAMES[i][1] and hour <= KEYFRAMES[i+1][1] then
+            before = KEYFRAMES[i]; after = KEYFRAMES[i+1]; break
+        end
+    end
+    if not before then before = KEYFRAMES[#KEYFRAMES]; after = KEYFRAMES[1]; hour = hour + 24 end
+    local span = after[1] - before[1]; if span <= 0 then span = 1 end
+    local t = (hour - before[1]) / span
+    return {
+        Density = lerpN(before[2], after[2], t),
+        Haze    = lerpN(before[3], after[3], t),
+        Glare   = lerpN(before[4], after[4], t),
+        AtmColor= lerpC(before[5], after[5], t),
+        AtmDecay= lerpC(before[6], after[6], t),
+        TintColor = lerpC(before[10], after[10], t),
+    }
+end
+
+task.spawn(function()
+    local accum = 0
+    while _G.INVALIDX_SHADER_LOADED do
+        local dt = RunService.Heartbeat:Wait()
+        if panicking then break end
+        if CONFIG.DynamicTimeEnabled then
+            accum = accum + dt
+            local perHour = (CONFIG.DynamicTimeSpeed or 900) / 24
+            if accum >= perHour then
+                accum = accum - perHour
+                Lighting.ClockTime = (Lighting.ClockTime + 1) % 24
+            end
+        end
+        if CONFIG.TimeBlendEnabled and CONFIG.AtmosEnabled and effects.Atmo and CONFIG.WeatherMode == "None" then
+            local b = getBlend(Lighting.ClockTime)
+            tweenProp(effects.Atmo, "Density", b.Density, 1.4)
+            tweenProp(effects.Atmo, "Haze", b.Haze, 1.4)
+            tweenProp(effects.Atmo, "Glare", b.Glare, 1.4)
+            tweenProp(effects.Atmo, "Color", b.AtmColor, 1.4)
+            tweenProp(effects.Atmo, "Decay", b.AtmDecay, 1.4)
+            if effects.CC then
+                tweenProp(effects.CC, "TintColor", b.TintColor, 1.4)
+            end
+        end
+    end
+end)
+
+-- ============================================================
+--  UI
+-- ============================================================
+local UI = Instance.new("ScreenGui")
+UI.Name = "InvalidX_ShadersUI"
+UI.ResetOnSpawn = false
+UI.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+UI.Parent = CoreGui
+
+local IS_MOBILE = UserInputService.TouchEnabled and not UserInputService.MouseEnabled
+local VW = workspace.CurrentCamera.ViewportSize
+local BASE_W, BASE_H = 620, 440
+local SCALE = 1
+if IS_MOBILE or VW.X < 700 then
+    SCALE = math.clamp(VW.X * 0.9 / BASE_W, 0.6, 1)
+end
+
+local main = Instance.new("Frame")
+main.Size = UDim2.new(0, BASE_W, 0, BASE_H)
+main.Position = IS_MOBILE and UDim2.new(0.5, -BASE_W/2, 0.5, -BASE_H/2) or UDim2.new(0, 30, 0, 80)
+main.BackgroundColor3 = Color3.fromRGB(10, 8, 16)
+main.BackgroundTransparency = 0.08
+main.BorderSizePixel = 0
+main.Active = true
+main.ClipsDescendants = true
+main.Parent = UI
+
+local uiScale = Instance.new("UIScale", main)
+uiScale.Scale = SCALE
+
+Instance.new("UICorner", main).CornerRadius = UDim.new(0, 16)
+local mainStroke = Instance.new("UIStroke", main)
+mainStroke.Thickness = 2
+mainStroke.Color = Color3.fromRGB(180, 80, 255)
+local mainGlow = Instance.new("UIStroke", main)
+mainGlow.Thickness = 10
+mainGlow.Color = Color3.fromRGB(180, 80, 255)
+mainGlow.Transparency = 0.94
+
+do
+    local dragging, dragStart, startPos = false, nil, nil
+    local function begin(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+            dragging = true; dragStart = i.Position; startPos = main.Position
+        end
+    end
+    local function stop(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then dragging = false end
+    end
+    local function move(i)
+        if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
+            local d = i.Position - dragStart
+            main.Position = UDim2.new(startPos.X.Scale,startPos.X.Offset+d.X,startPos.Y.Scale,startPos.Y.Offset+d.Y)
+        end
+    end
+    main.InputBegan:Connect(begin)
+    main.InputEnded:Connect(stop)
+    UserInputService.InputChanged:Connect(move)
+end
+
+local titleBar = Instance.new("Frame", main)
+titleBar.Size = UDim2.new(1, 0, 0, 46)
+titleBar.BackgroundTransparency = 1
+
+local titleLbl = Instance.new("TextLabel", titleBar)
+titleLbl.Size = UDim2.new(0, 320, 0, 26)
+titleLbl.Position = UDim2.new(0, 14, 0, 6)
+titleLbl.BackgroundTransparency = 1
+titleLbl.Font = Enum.Font.GothamBold
+titleLbl.Text = "InvalidX Shaders v5.0"
+titleLbl.TextColor3 = Color3.fromRGB(255,255,255)
+titleLbl.TextSize = 18
+titleLbl.TextXAlignment = Enum.TextXAlignment.Left
+
+local subLbl = Instance.new("TextLabel", titleBar)
+subLbl.Size = UDim2.new(0, 320, 0, 14)
+subLbl.Position = UDim2.new(0, 14, 0, 30)
+subLbl.BackgroundTransparency = 1
+subLbl.Font = Enum.Font.Gotham
+subLbl.Text = "Real Weather · 3D/4D Audio · Auto-Preset · 14 Presets"
+subLbl.TextColor3 = Color3.fromRGB(170,170,200)
+subLbl.TextSize = 10
+subLbl.TextXAlignment = Enum.TextXAlignment.Left
+
+local hideBtn = Instance.new("TextButton", titleBar)
+hideBtn.Size = UDim2.new(0, 30, 0, 30)
+hideBtn.Position = UDim2.new(1, -70, 0, 8)
+hideBtn.BackgroundColor3 = Color3.fromRGB(30,25,45)
+hideBtn.BorderSizePixel = 0
+hideBtn.Font = Enum.Font.GothamBold
+hideBtn.Text = "—"
+hideBtn.TextColor3 = Color3.fromRGB(255,255,255)
+hideBtn.TextSize = 16
+Instance.new("UICorner", hideBtn).CornerRadius = UDim.new(0, 8)
+
+local closeBtn = Instance.new("TextButton", titleBar)
+closeBtn.Size = UDim2.new(0, 30, 0, 30)
+closeBtn.Position = UDim2.new(1, -36, 0, 8)
+closeBtn.BackgroundColor3 = Color3.fromRGB(120,40,55)
+closeBtn.BorderSizePixel = 0
+closeBtn.Font = Enum.Font.GothamBold
+closeBtn.Text = "×"
+closeBtn.TextColor3 = Color3.fromRGB(255,255,255)
+closeBtn.TextSize = 16
+Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 8)
+
+local tabBar = Instance.new("Frame", main)
+tabBar.Size = UDim2.new(1, -20, 0, 30)
+tabBar.Position = UDim2.new(0, 10, 0, 52)
+tabBar.BackgroundTransparency = 1
+
+local TABS = {"PRESETS", "LIGHTING", "SKY", "MATERIALS", "WEATHER", "AUDIO", "POST-FX", "EXTRA"}
+local tabBtns = {}
+local activeTab = nil
+
+local content = Instance.new("Frame", main)
+content.Size = UDim2.new(1, -20, 1, -152)
+content.Position = UDim2.new(0, 10, 0, 92)
+content.BackgroundTransparency = 1
+content.ClipsDescendants = true
+
+local presetsLeft = Instance.new("ScrollingFrame", content)
+presetsLeft.Size = UDim2.new(0.5, -4, 1, 0)
+presetsLeft.BackgroundTransparency = 1
+presetsLeft.BorderSizePixel = 0
+presetsLeft.ScrollBarThickness = 3
+presetsLeft.ScrollBarImageColor3 = Color3.fromRGB(180,80,255)
+presetsLeft.CanvasSize = UDim2.new(0,0,0,0)
+presetsLeft.AutomaticCanvasSize = Enum.AutomaticSize.Y
+presetsLeft.Visible = false
+local plLayout = Instance.new("UIListLayout", presetsLeft)
+plLayout.Padding = UDim.new(0, 5)
+
+local presetsRight = Instance.new("Frame", content)
+presetsRight.Size = UDim2.new(0.5, -4, 1, 0)
+presetsRight.Position = UDim2.new(0.5, 4, 0, 0)
+presetsRight.BackgroundTransparency = 1
+presetsRight.Visible = false
+local prLayout = Instance.new("UIListLayout", presetsRight)
+prLayout.Padding = UDim.new(0, 5)
+
+local genericScroll = Instance.new("ScrollingFrame", content)
+genericScroll.Size = UDim2.new(1, 0, 1, 0)
+genericScroll.BackgroundTransparency = 1
+genericScroll.BorderSizePixel = 0
+genericScroll.ScrollBarThickness = 3
+genericScroll.ScrollBarImageColor3 = Color3.fromRGB(180,80,255)
+genericScroll.CanvasSize = UDim2.new(0,0,0,0)
+genericScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+genericScroll.Visible = false
+local glLayout = Instance.new("UIListLayout", genericScroll)
+glLayout.Padding = UDim.new(0, 5)
+
+local function clearList(container)
+    for _, c in ipairs(container:GetChildren()) do
+        if not c:IsA("UIListLayout") and not c:IsA("UIPadding") then c:Destroy() end
+    end
+end
+
+local function btn(parent, label, cb, h, accent)
+    local b = Instance.new("TextButton", parent)
+    b.Size = UDim2.new(1, 0, 0, h or 34)
+    b.BackgroundColor3 = accent or Color3.fromRGB(26,20,38)
+    b.BackgroundTransparency = accent and 0 or 0.15
+    b.BorderSizePixel = 0
+    b.Font = Enum.Font.GothamBold
+    b.Text = label
+    b.TextColor3 = Color3.fromRGB(240,240,255)
+    b.TextSize = 12
+    b.AutoButtonColor = false
+    Instance.new("UICorner", b).CornerRadius = UDim.new(0, 8)
+    b.MouseEnter:Connect(function()
+        TweenService:Create(b, TweenInfo.new(0.15), {BackgroundColor3 = accent or Color3.fromRGB(40,30,60)}):Play()
+    end)
+    b.MouseLeave:Connect(function()
+        TweenService:Create(b, TweenInfo.new(0.15), {BackgroundColor3 = accent or Color3.fromRGB(26,20,38)}):Play()
+    end)
+    b.MouseButton1Click:Connect(cb)
+    return b
+end
+
+local function toggleRow(parent, label, key)
+    local row = Instance.new("Frame", parent)
+    row.Size = UDim2.new(1, 0, 0, 34)
+    row.BackgroundColor3 = Color3.fromRGB(26,20,38)
+    row.BackgroundTransparency = 0.15
+    row.BorderSizePixel = 0
+    Instance.new("UICorner", row).CornerRadius = UDim.new(0, 8)
+
+    local lbl = Instance.new("TextLabel", row)
+    lbl.Size = UDim2.new(1, -70, 1, 0)
+    lbl.Position = UDim2.new(0, 12, 0, 0)
+    lbl.BackgroundTransparency = 1
+    lbl.Font = Enum.Font.GothamSemibold
+    lbl.Text = label
+    lbl.TextColor3 = Color3.fromRGB(230,230,245)
+    lbl.TextSize = 12
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+
+    local state = CONFIG[key]
+    local sw = Instance.new("TextButton", row)
+    sw.Size = UDim2.new(0, 44, 0, 22)
+    sw.Position = UDim2.new(1, -54, 0.5, -11)
+    sw.BackgroundColor3 = state and Color3.fromRGB(180,80,255) or Color3.fromRGB(60,55,80)
+    sw.BorderSizePixel = 0
+    sw.Text = ""
+    Instance.new("UICorner", sw).CornerRadius = UDim.new(1, 0)
+
+    local knob = Instance.new("Frame", sw)
+    knob.Size = UDim2.new(0, 16, 0, 16)
+    knob.Position = state and UDim2.new(1, -19, 0.5, -8) or UDim2.new(0, 3, 0.5, -8)
+    knob.BackgroundColor3 = Color3.fromRGB(255,255,255)
+    knob.BorderSizePixel = 0
+    Instance.new("UICorner", knob).CornerRadius = UDim.new(1, 0)
+
+    sw.MouseButton1Click:Connect(function()
+        state = not state
+        CONFIG[key] = state
+        TweenService:Create(sw, TweenInfo.new(0.15), {BackgroundColor3 = state and Color3.fromRGB(180,80,255) or Color3.fromRGB(60,55,80)}):Play()
+        TweenService:Create(knob, TweenInfo.new(0.15), {Position = state and UDim2.new(1, -19, 0.5, -8) or UDim2.new(0, 3, 0.5, -8)}):Play()
+        applyAll()
+        if key == "MaterialBoost" then applyMaterialBoost() end
+        if key == "DisableMapLighting" then
+            if state then disableMapLighting() else restoreMapLighting() end
+        end
+        if key == "AudioEnabled" then applyAudio() end
+    end)
+    return row
+end
+
+local function sliderRow(parent, label, key, min, max, dec)
+    dec = dec or 2
+    local row = Instance.new("Frame", parent)
+    row.Size = UDim2.new(1, 0, 0, 42)
+    row.BackgroundColor3 = Color3.fromRGB(26,20,38)
+    row.BackgroundTransparency = 0.15
+    row.BorderSizePixel = 0
+    Instance.new("UICorner", row).CornerRadius = UDim.new(0, 8)
+
+    local lbl = Instance.new("TextLabel", row)
+    lbl.Size = UDim2.new(1, -20, 0, 16)
+    lbl.Position = UDim2.new(0, 12, 0, 4)
+    lbl.BackgroundTransparency = 1
+    lbl.Font = Enum.Font.GothamSemibold
+    lbl.TextColor3 = Color3.fromRGB(230,230,245)
+    lbl.TextSize = 11
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.Text = label .. ": " .. string.format("%."..dec.."f", CONFIG[key])
+
+    local bg = Instance.new("Frame", row)
+    bg.Size = UDim2.new(1, -24, 0, 10)
+    bg.Position = UDim2.new(0, 12, 0, 26)
+    bg.BackgroundColor3 = Color3.fromRGB(45,35,60)
+    bg.BorderSizePixel = 0
+    Instance.new("UICorner", bg).CornerRadius = UDim.new(0, 5)
+
+    local fill = Instance.new("Frame", bg)
+    local pct = (CONFIG[key] - min) / (max - min)
+    fill.Size = UDim2.new(math.clamp(pct,0,1), 0, 1, 0)
+    fill.BackgroundColor3 = Color3.fromRGB(180,80,255)
+    fill.BorderSizePixel = 0
+    Instance.new("UICorner", fill).CornerRadius = UDim.new(0, 5)
+
+    local dragging = false
+    local function update(x)
+        local px = math.clamp((x - bg.AbsolutePosition.X) / bg.AbsoluteSize.X, 0, 1)
+        local v = min + px * (max - min)
+        v = tonumber(string.format("%."..dec.."f", v))
+        CONFIG[key] = v
+        lbl.Text = label .. ": " .. string.format("%."..dec.."f", v)
+        fill.Size = UDim2.new(px, 0, 1, 0)
+        applyAll()
+        if key == "MaterialBoostAmount" then applyMaterialBoost() end
+    end
+    bg.InputBegan:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+            dragging = true; update(i.Position.X)
+        end
+    end)
+    bg.InputEnded:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then dragging = false end
+    end)
+    UserInputService.InputChanged:Connect(function(i)
+        if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
+            update(i.Position.X)
+        end
+    end)
+    return row
+end
+
+local function dropdownRow(parent, label, key, options)
+    local row = Instance.new("Frame", parent)
+    row.Size = UDim2.new(1, 0, 0, 34)
+    row.BackgroundColor3 = Color3.fromRGB(26,20,38)
+    row.BackgroundTransparency = 0.15
+    row.BorderSizePixel = 0
+    Instance.new("UICorner", row).CornerRadius = UDim.new(0, 8)
+
+    local lbl = Instance.new("TextLabel", row)
+    lbl.Size = UDim2.new(0, 150, 1, 0)
+    lbl.Position = UDim2.new(0, 12, 0, 0)
+    lbl.BackgroundTransparency = 1
+    lbl.Font = Enum.Font.GothamSemibold
+    lbl.Text = label
+    lbl.TextColor3 = Color3.fromRGB(230,230,245)
+    lbl.TextSize = 12
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+
+    local val = Instance.new("TextLabel", row)
+    val.Size = UDim2.new(0, 200, 1, 0)
+    val.Position = UDim2.new(1, -212, 0, 0)
+    val.BackgroundTransparency = 1
+    val.Font = Enum.Font.GothamBold
+    val.Text = tostring(CONFIG[key]) .. " ▾"
+    val.TextColor3 = Color3.fromRGB(180,80,255)
+    val.TextSize = 12
+    val.TextXAlignment = Enum.TextXAlignment.Right
+
+    local btn = Instance.new("TextButton", row)
+    btn.Size = UDim2.new(1, 0, 1, 0)
+    btn.BackgroundTransparency = 1
+    btn.Text = ""
+    local idx = 1
+    for i, v in ipairs(options) do if v == CONFIG[key] then idx = i end end
+    btn.MouseButton1Click:Connect(function()
+        idx = idx + 1
+        if idx > #options then idx = 1 end
+        CONFIG[key] = options[idx]
+        val.Text = tostring(options[idx]) .. " ▾"
+        applyAll()
+    end)
+    return row
+end
+
+local function header(parent, text)
+    local l = Instance.new("TextLabel", parent)
+    l.Size = UDim2.new(1, 0, 0, 20)
+    l.BackgroundTransparency = 1
+    l.Font = Enum.Font.GothamBold
+    l.Text = text
+    l.TextColor3 = Color3.fromRGB(180,80,255)
+    l.TextSize = 11
+    l.TextXAlignment = Enum.TextXAlignment.Left
+    return l
+end
+
+local function SetTab(name)
+    activeTab = name
+    for tn, b in pairs(tabBtns) do
+        if tn == name then
+            b.BackgroundColor3 = Color3.fromRGB(180,80,255)
+            b.BackgroundTransparency = 0
+            b.TextColor3 = Color3.fromRGB(255,255,255)
+        else
+            b.BackgroundColor3 = Color3.fromRGB(26,20,38)
+            b.BackgroundTransparency = 0.15
+            b.TextColor3 = Color3.fromRGB(180,180,210)
+        end
+    end
+    presetsLeft.Visible = (name == "PRESETS")
+    presetsRight.Visible = (name == "PRESETS")
+    genericScroll.Visible = (name ~= "PRESETS")
+
+    if name == "PRESETS" then
+        clearList(presetsLeft)
+        clearList(presetsRight)
+
+        header(presetsLeft, "SLOTS (Save/Load your own)")
+        for i = 1, 8 do
+            local slot = i
+            local row = Instance.new("Frame", presetsLeft)
+            row.Size = UDim2.new(1, 0, 0, 32)
+            row.BackgroundColor3 = Color3.fromRGB(26,20,38)
+            row.BackgroundTransparency = 0.15
+            row.BorderSizePixel = 0
+            Instance.new("UICorner", row).CornerRadius = UDim.new(0, 8)
+
+            local lbl = Instance.new("TextLabel", row)
+            lbl.Size = UDim2.new(0.5, -10, 1, 0)
+            lbl.Position = UDim2.new(0, 10, 0, 0)
+            lbl.BackgroundTransparency = 1
+            lbl.Font = Enum.Font.GothamBold
+            lbl.Text = "Slot " .. i
+            lbl.TextColor3 = Color3.fromRGB(230,230,245)
+            lbl.TextSize = 12
+            lbl.TextXAlignment = Enum.TextXAlignment.Left
+
+            local loadBtn = Instance.new("TextButton", row)
+            loadBtn.Size = UDim2.new(0.24, -4, 0, 24)
+            loadBtn.Position = UDim2.new(0.5, 2, 0.5, -12)
+            loadBtn.BackgroundColor3 = Color3.fromRGB(60,45,95)
+            loadBtn.BorderSizePixel = 0
+            loadBtn.Font = Enum.Font.GothamBold
+            loadBtn.Text = "Load"
+            loadBtn.TextColor3 = Color3.fromRGB(255,255,255)
+            loadBtn.TextSize = 11
+            Instance.new("UICorner", loadBtn).CornerRadius = UDim.new(0, 6)
+            loadBtn.MouseButton1Click:Connect(function() loadSlot(slot) end)
+
+            local saveBtn = Instance.new("TextButton", row)
+            saveBtn.Size = UDim2.new(0.24, -4, 0, 24)
+            saveBtn.Position = UDim2.new(0.75, 2, 0.5, -12)
+            saveBtn.BackgroundColor3 = Color3.fromRGB(45,75,55)
+            saveBtn.BorderSizePixel = 0
+            saveBtn.Font = Enum.Font.GothamBold
+            saveBtn.Text = "Save"
+            saveBtn.TextColor3 = Color3.fromRGB(255,255,255)
+            saveBtn.TextSize = 11
+            Instance.new("UICorner", saveBtn).CornerRadius = UDim.new(0, 6)
+            saveBtn.MouseButton1Click:Connect(function() saveSlot(slot) end)
+        end
+
+        header(presetsLeft, "14 CINEMA PRESETS")
+        local sortedNames = {}
+        for n, _ in pairs(BUILTIN) do table.insert(sortedNames, n) end
+        table.sort(sortedNames)
+        for _, name2 in ipairs(sortedNames) do
+            btn(presetsLeft, "★  " .. name2, function() applyBuiltin(name2) end)
+        end
+
+        header(presetsRight, "SMART PRESET")
+        btn(presetsRight, "🎯  Choose Best For This Game", function()
+            local preset, reason = analyzeGame()
+            if preset then
+                applyBuiltin(preset, true)
+                notify("Smart Preset", preset .. " — " .. reason, 4)
+            end
+        end)
+        toggleRow(presetsRight, "Auto-Apply on Join", "AutoPresetOnJoin")
+
+        header(presetsRight, "LIGHTING CONTROLS")
+        btn(presetsRight, "Disable Map Lighting", function()
+            CONFIG.DisableMapLighting = not CONFIG.DisableMapLighting
+            if CONFIG.DisableMapLighting then disableMapLighting() else restoreMapLighting() end
+        end)
+        btn(presetsRight, "Reset Default Lighting", function()
+            restoreMapLighting()
+            pcall(function()
+                Lighting.Ambient = saved.Lighting.Ambient
+                Lighting.OutdoorAmbient = saved.Lighting.OutdoorAmbient
+                Lighting.Brightness = saved.Lighting.Brightness
+                Lighting.ShadowSoftness = saved.Lighting.ShadowSoftness
+                Lighting.GlobalShadows = saved.Lighting.GlobalShadows
+                Lighting.EnvironmentDiffuseScale = saved.Lighting.EnvironmentDiffuseScale
+                Lighting.EnvironmentSpecularScale = saved.Lighting.EnvironmentSpecularScale
+                Lighting.ExposureCompensation = saved.Lighting.ExposureCompensation
+                Lighting.ClockTime = saved.Lighting.ClockTime
+            end)
+            notify("Reset", "Map lighting restored", 2)
+        end)
+        header(presetsRight, "MASTER")
+        sliderRow(presetsRight, "Master Intensity", "MasterIntensity", 0, 2)
+        dropdownRow(presetsRight, "Quality Tier", "QualityTier", {"Performance","Balanced","High","Ultra"})
+    elseif name == "LIGHTING" then
+        clearList(genericScroll)
+        toggleRow(genericScroll, "Disable Map Lighting", "DisableMapLighting")
+        toggleRow(genericScroll, "Global Shadows", "GlobalShadows")
+        header(genericScroll, "PBR SCALES")
+        sliderRow(genericScroll, "Environment Specular", "EnvSpecularScale", 0, 1)
+        sliderRow(genericScroll, "Environment Diffuse", "EnvDiffuseScale", 0, 1)
+        header(genericScroll, "BASIC")
+        sliderRow(genericScroll, "Brightness", "Brightness", 0, 5, 1)
+        sliderRow(genericScroll, "Shadow Softness", "ShadowSoftness", 0, 1)
+        sliderRow(genericScroll, "Exposure", "Exposure", -1, 1)
+        header(genericScroll, "AMBIENT COLOR")
+        btn(genericScroll, "Dark Ambient", function() CONFIG.Ambient = Color3.fromRGB(5,5,10); applyAll() end)
+        btn(genericScroll, "Neutral Ambient", function() CONFIG.Ambient = Color3.fromRGB(70,70,70); applyAll() end)
+        btn(genericScroll, "Bright Ambient", function() CONFIG.Ambient = Color3.fromRGB(120,120,120); applyAll() end)
+    elseif name == "SKY" then
+        clearList(genericScroll)
+        toggleRow(genericScroll, "Custom Skybox", "SkyEnabled")
+        dropdownRow(genericScroll, "Sky Preset", "SkyID", {1, 2, 3, 4, 5})
+        toggleRow(genericScroll, "Clouds", "CloudsEnabled")
+        sliderRow(genericScroll, "Cloud Cover", "CloudsCover", 0, 1)
+        sliderRow(genericScroll, "Cloud Density", "CloudsDensity", 0, 1)
+        header(genericScroll, "TIME OF DAY")
+        btn(genericScroll, "🌅 Sunrise (6:00)", function() TweenService:Create(Lighting, TweenInfo.new(3), {ClockTime = 6}):Play() end)
+        btn(genericScroll, "☀️ Noon (12:00)", function() TweenService:Create(Lighting, TweenInfo.new(3), {ClockTime = 12}):Play() end)
+        btn(genericScroll, "🌇 Sunset (18:00)", function() TweenService:Create(Lighting, TweenInfo.new(3), {ClockTime = 18}):Play() end)
+        btn(genericScroll, "🌙 Night (0:00)", function() TweenService:Create(Lighting, TweenInfo.new(3), {ClockTime = 0}):Play() end)
+        toggleRow(genericScroll, "Dynamic Time", "DynamicTimeEnabled")
+        sliderRow(genericScroll, "Day Length (sec)", "DynamicTimeSpeed", 60, 3600, 0)
+        toggleRow(genericScroll, "Smooth Time Blend", "TimeBlendEnabled")
+    elseif name == "MATERIALS" then
+        clearList(genericScroll)
+        local info = Instance.new("TextLabel", genericScroll)
+        info.Size = UDim2.new(1, 0, 0, 55)
+        info.BackgroundColor3 = Color3.fromRGB(26,20,38)
+        info.BackgroundTransparency = 0.4
+        info.BorderSizePixel = 0
+        info.Font = Enum.Font.Gotham
+        info.Text = "Material Boost adds Reflectance to Metal, Glass, Plastic within 500 studs. Makes the world feel coated."
+        info.TextColor3 = Color3.fromRGB(200,200,220)
+        info.TextSize = 10
+        info.TextWrapped = true
+        info.TextXAlignment = Enum.TextXAlignment.Left
+        local pad = Instance.new("UIPadding", info)
+        pad.PaddingLeft = UDim.new(0, 10)
+        pad.PaddingTop = UDim.new(0, 8)
+        Instance.new("UICorner", info).CornerRadius = UDim.new(0, 8)
+
+        toggleRow(genericScroll, "Material Boost", "MaterialBoost")
+        sliderRow(genericScroll, "Boost Amount", "MaterialBoostAmount", 0, 0.5)
+        btn(genericScroll, "🔄  Rescan Now", function()
+            applyMaterialBoost()
+            notify("Materials", "Rescanned", 1.5)
+        end)
+        header(genericScroll, "WATER")
+        toggleRow(genericScroll, "Enhanced Water", "WaterEnabled")
+        sliderRow(genericScroll, "Reflectance", "WaterReflectance", 0, 1)
+        sliderRow(genericScroll, "Transparency", "WaterTransparency", 0, 1)
+        sliderRow(genericScroll, "Wave Size", "WaterWaveSize", 0, 2)
+        sliderRow(genericScroll, "Wave Speed", "WaterWaveSpeed", 0, 20, 0)
+    elseif name == "WEATHER" then
+        clearList(genericScroll)
+        header(genericScroll, "REAL WEATHER (particles + sound)")
+        for _, mode in ipairs({"None","Clear","Rain","Fog","Storm","Snow","Ash"}) do
+            local b = btn(genericScroll, mode, function()
+                CONFIG.WeatherMode = mode
+                applyWeather()
+                notify("Weather", mode .. " enabled", 1.5)
+            end)
+            if CONFIG.WeatherMode == mode then
+                b.BackgroundColor3 = Color3.fromRGB(180,80,255)
+                b.BackgroundTransparency = 0
+            end
+        end
+        header(genericScroll, "SETTINGS")
+        toggleRow(genericScroll, "Weather Sounds", "WeatherSounds")
+    elseif name == "AUDIO" then
+        clearList(genericScroll)
+        header(genericScroll, "3D / 4D AUDIO")
+        toggleRow(genericScroll, "Enhanced Audio", "AudioEnabled")
+        dropdownRow(genericScroll, "Ambient Reverb", "AudioReverb",
+            {"Default","Outdoor","Hallway","Forest","City","Mountains","Room","Cave"})
+        sliderRow(genericScroll, "Distance Factor", "AudioDistanceFactor", 0.5, 10)
+        sliderRow(genericScroll, "Doppler Scale", "AudioDopplerScale", 0, 3)
+        sliderRow(genericScroll, "Rolloff Scale", "AudioRolloffScale", 0.1, 3)
+
+        header(genericScroll, "PRESET REVERBS")
+        btn(genericScroll, "🌳  Forest Reverb", function() CONFIG.AudioReverb = "Forest"; applyAudio() end)
+        btn(genericScroll, "🏙️  City Reverb", function() CONFIG.AudioReverb = "City"; applyAudio() end)
+        btn(genericScroll, "🏔️  Mountains Reverb", function() CONFIG.AudioReverb = "Mountains"; applyAudio() end)
+        btn(genericScroll, "🏛️  Hallway Reverb", function() CONFIG.AudioReverb = "Hallway"; applyAudio() end)
+        btn(genericScroll, "🕳️  Cave Reverb", function() CONFIG.AudioReverb = "Cave"; applyAudio() end)
+        btn(genericScroll, "🔇  Disable Reverb", function() CONFIG.AudioReverb = "Default"; applyAudio() end)
+    elseif name == "POST-FX" then
+        clearList(genericScroll)
+        header(genericScroll, "BLOOM")
+        toggleRow(genericScroll, "Bloom", "BloomEnabled")
+        sliderRow(genericScroll, "Intensity", "BloomIntensity", 0, 2)
+        sliderRow(genericScroll, "Size", "BloomSize", 0, 40, 0)
+        sliderRow(genericScroll, "Threshold", "BloomThreshold", 0, 1)
+        header(genericScroll, "COLOR CORRECTION")
+        toggleRow(genericScroll, "Color Correction", "CCEnabled")
+        sliderRow(genericScroll, "Brightness", "CCBrightness", -0.5, 0.5)
+        sliderRow(genericScroll, "Contrast", "CCContrast", -1, 1)
+        sliderRow(genericScroll, "Saturation", "CCSaturation", -1, 1)
+        header(genericScroll, "DEPTH OF FIELD")
+        toggleRow(genericScroll, "Depth of Field", "DOFEnabled")
+        sliderRow(genericScroll, "Far Intensity", "DOFFarIntensity", 0, 1)
+        sliderRow(genericScroll, "Focus Distance", "DOFFocusDistance", 5, 100, 0)
+        header(genericScroll, "SUN RAYS")
+        toggleRow(genericScroll, "Sun Rays", "SunRaysEnabled")
+        sliderRow(genericScroll, "Intensity", "SunRaysIntensity", 0, 1)
+        header(genericScroll, "BLUR")
+        toggleRow(genericScroll, "Blur (subtle)", "BlurEnabled")
+        sliderRow(genericScroll, "Size", "BlurSize", 0, 8)
+        header(genericScroll, "ATMOSPHERE")
+        toggleRow(genericScroll, "Atmosphere", "AtmosEnabled")
+        sliderRow(genericScroll, "Density", "AtmosDensity", 0, 1)
+        sliderRow(genericScroll, "Haze", "AtmosHaze", 0, 5)
+        sliderRow(genericScroll, "Glare", "AtmosGlare", 0, 2)
+    elseif name == "EXTRA" then
+        clearList(genericScroll)
+        header(genericScroll, "SAVE / LOAD")
+        btn(genericScroll, "💾  Save Config File", saveConfig)
+        btn(genericScroll, "📂  Load Config File", function() loadConfig(); applyAll() end)
+        header(genericScroll, "MASTER")
+        toggleRow(genericScroll, "Shaders Enabled", "Enabled")
+        toggleRow(genericScroll, "Custom FOV", "FOVEnabled")
+        sliderRow(genericScroll, "FOV Value", "FOVValue", 20, 120, 0)
+        header(genericScroll, "ABOUT")
+        local info = Instance.new("TextLabel", genericScroll)
+        info.Size = UDim2.new(1, 0, 0, 170)
+        info.BackgroundColor3 = Color3.fromRGB(26,20,38)
+        info.BackgroundTransparency = 0.4
+        info.BorderSizePixel = 0
+        info.Font = Enum.Font.Gotham
+        info.Text = "InvalidX Shaders v5.0 — RoShade Killer\n\n• 14 cinema presets\n• 8 save slots\n• Real weather particles + sound\n• 3D/4D positional audio\n• Auto-preset based on game\n• PBR Environment scales\n• Full Post-FX stack\n• Material Boost\n• Time of day blending\n\nPress P = panic restore.\nRightCtrl = hide UI."
+        info.TextColor3 = Color3.fromRGB(210,210,230)
+        info.TextSize = 11
+        info.TextWrapped = true
+        info.TextXAlignment = Enum.TextXAlignment.Left
+        info.TextYAlignment = Enum.TextYAlignment.Top
+        local pad = Instance.new("UIPadding", info)
+        pad.PaddingLeft = UDim.new(0, 12)
+        pad.PaddingTop = UDim.new(0, 10)
+        Instance.new("UICorner", info).CornerRadius = UDim.new(0, 8)
+
+        btn(genericScroll, "🚨  PANIC RESTORE", function()
+            if getgenv().InvalidX_Shader_Unload then getgenv().InvalidX_Shader_Unload() end
+        end, 40, Color3.fromRGB(160,50,70))
+    end
+end
+
+for i, name in ipairs(TABS) do
+    local b = Instance.new("TextButton", tabBar)
+    b.Size = UDim2.new(1/#TABS, -3, 1, 0)
+    b.Position = UDim2.new((i-1)/#TABS, 1.5, 0, 0)
+    b.BackgroundColor3 = Color3.fromRGB(26,20,38)
+    b.BackgroundTransparency = 0.15
+    b.BorderSizePixel = 0
+    b.Font = Enum.Font.GothamBold
+    b.Text = name
+    b.TextColor3 = Color3.fromRGB(180,180,210)
+    b.TextSize = 10
+    Instance.new("UICorner", b).CornerRadius = UDim.new(0, 7)
+    b.MouseButton1Click:Connect(function() SetTab(name) end)
+    tabBtns[name] = b
+end
+
+local restoreBtn = Instance.new("TextButton", UI)
+restoreBtn.Size = UDim2.new(0, 48, 0, 48)
+restoreBtn.Position = UDim2.new(1, -66, 0, 14)
+restoreBtn.BackgroundColor3 = Color3.fromRGB(10,8,16)
+restoreBtn.BackgroundTransparency = 0.1
+restoreBtn.BorderSizePixel = 0
+restoreBtn.Font = Enum.Font.GothamBold
+restoreBtn.Text = "IX"
+restoreBtn.TextColor3 = Color3.fromRGB(180,80,255)
+restoreBtn.TextSize = 18
+restoreBtn.Visible = false
+Instance.new("UICorner", restoreBtn).CornerRadius = UDim.new(1, 0)
+local rs = Instance.new("UIStroke", restoreBtn)
+rs.Thickness = 2
+rs.Color = Color3.fromRGB(180,80,255)
+
+restoreBtn.MouseButton1Click:Connect(function()
+    uiVisible = true; main.Visible = true; restoreBtn.Visible = false
+end)
+hideBtn.MouseButton1Click:Connect(function()
+    uiVisible = false; main.Visible = false; restoreBtn.Visible = true
+end)
+closeBtn.MouseButton1Click:Connect(function()
+    uiVisible = false; main.Visible = false; restoreBtn.Visible = true
+end)
+
+-- ============================================================
+--  PANIC
+-- ============================================================
+local function panicRestore()
+    panicking = true
+    _G.INVALIDX_SHADER_LOADED = false
+
+    restoreMapLighting()
+    clearWeatherObjects()
+    for _, e in pairs(effects) do pcall(function() e:Destroy() end) end
+    effects = {}
+
+    for part, orig in pairs(boostedParts) do
+        pcall(function() part.Reflectance = orig end)
+    end
+    boostedParts = {}
+
+    pcall(function()
+        Lighting.Ambient = saved.Lighting.Ambient
+        Lighting.OutdoorAmbient = saved.Lighting.OutdoorAmbient
+        Lighting.Brightness = saved.Lighting.Brightness
+        Lighting.ShadowSoftness = saved.Lighting.ShadowSoftness
+        Lighting.GlobalShadows = saved.Lighting.GlobalShadows
+        Lighting.EnvironmentDiffuseScale = saved.Lighting.EnvironmentDiffuseScale
+        Lighting.EnvironmentSpecularScale = saved.Lighting.EnvironmentSpecularScale
+        Lighting.ExposureCompensation = saved.Lighting.ExposureCompensation
+        Lighting.ClockTime = saved.Lighting.ClockTime
+        Lighting.FogEnd = saved.Lighting.FogEnd
+        Lighting.FogStart = saved.Lighting.FogStart
+        Lighting.FogColor = saved.Lighting.FogColor
+        Terrain.WaterReflectance = saved.Terrain.WaterReflectance
+        Terrain.WaterTransparency = saved.Terrain.WaterTransparency
+        Terrain.WaterWaveSize = saved.Terrain.WaterWaveSize
+        Terrain.WaterWaveSpeed = saved.Terrain.WaterWaveSpeed
+        SoundService.AmbientReverb = saved.Sound.AmbientReverb
+        SoundService.DistanceFactor = saved.Sound.DistanceFactor
+        SoundService.DopplerScale = saved.Sound.DopplerScale
+        SoundService.RolloffScale = saved.Sound.RolloffScale
+    end)
+
+    local sky = Lighting:FindFirstChild("InvalidX_Sky")
+    if sky then
+        sky:Destroy()
+        if saved.Sky then saved.Sky:Clone().Parent = Lighting end
+    end
+    local clouds = Lighting:FindFirstChildOfClass("Clouds")
+    if clouds and saved.Clouds then
+        clouds.Cover = saved.Clouds.Cover
+        clouds.Density = saved.Clouds.Density
+        clouds.Color = saved.Clouds.Color
+    end
+
+    if UI then UI:Destroy() end
+    if notifGui then notifGui:Destroy() end
+    print("[InvalidX Shaders v5.0] Restored.")
+end
+
+getgenv().InvalidX_Shader_Unload = panicRestore
+
+UserInputService.InputBegan:Connect(function(input, gpe)
+    if gpe then return end
+    if input.KeyCode == Enum.KeyCode.P and not panicking then
+        panicRestore()
+    elseif input.KeyCode == Enum.KeyCode.RightControl then
+        uiVisible = not uiVisible
+        main.Visible = uiVisible
+        restoreBtn.Visible = not uiVisible
+    end
+end)
+
+-- ============================================================
+--  INIT
+-- ============================================================
+saveOriginals()
+loadConfig()
+SetTab("PRESETS")
+
+task.spawn(function()
+    while _G.INVALIDX_SHADER_LOADED do
+        task.wait(15)
+        if CONFIG.MaterialBoost and not panicking then applyMaterialBoost() end
+    end
+end)
+
+-- Re-apply weather if character respawns
+LocalPlayer.CharacterAdded:Connect(function()
+    task.wait(1)
+    if CONFIG.WeatherMode ~= "None" then applyWeather() end
+end)
+
+-- Auto preset on join
+task.delay(2, function()
+    if CONFIG.AutoPresetOnJoin then
+        autoApplyGamePreset()
+    else
+        applyAll()
+        if CONFIG.WeatherMode ~= "None" then applyWeather() end
+    end
+end)
+
+notify("InvalidX Shaders v5.0", "RoShade Killer loaded. P = panic. RightCtrl = hide.", 5)
+
+print("✅ InvalidX Shaders v5.0 loaded — RoShade Killer Edition")
